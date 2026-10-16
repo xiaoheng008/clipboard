@@ -274,7 +274,8 @@ enum CLI {
             guard let id = pos.first, let m = catalog.model(id: id) else { throw CLIError.usage("unknown model \(pos.first ?? "")") }
             print(String(format: "downloading %@ (%.0f MB)…", id, Double(m.downloadBytes) / 1_048_576))
             try await ModelInstaller(home: rt.home).install(m) { p in
-                FileHandle.standardError.write(Data(String(format: "\r  %@ %.0f%%   ", p.phase, Double(p.bytesDone) * 100 / Double(max(p.bytesTotal, 1))).utf8))
+                FileHandle.standardError.write(Data(String(format: "\r  %@ %3.0f%%  %.0f / %.0f MB   ", p.phase.rawValue, p.fraction * 100,
+                                                            Double(p.bytesDone) / 1_048_576, Double(p.bytesTotal) / 1_048_576).utf8))
             }
             print("\ninstalled \(id)")
             return 0

@@ -201,3 +201,67 @@ struct MobileCLIPIntegrationTests {
         #expect(ModelPaths.isInstalled(home: home, model: try manifest(good.absoluteString)))
     }
 }
+
+@Suite struct InstallProgressAndCancelTests {
+    final class Recorder: @unchecked Sendable {
+        private let lock = NSLock(); private var items: [InstallProgress] = []
+        func add(_ p: InstallProgress) { lock.lock(); items.append(p); lock.unlock() }
+        var all: [InstallProgress] { lock.lock(); defer { lock.unlock() }; return items }
+    }
+
+    func manifest(_ home: AppHome, files: Int, size: Int) throws -> ModelManifest {
+        var list: [ModelFile] = []
+        for i in 0..<files {
+            let u = home.root.appendingPathComponent("src\(i).bin")
+            try Data(repeating: UInt8(i), count: size).write(to: u)
+            list.append(ModelFile(path: "f\(i).bin", url: u.absoluteString, sha256: try ModelInstaller.sha256(of: u), size: Int64(size)))
+        }
+        return ModelManifest(id: "prog@1", family: "coreml-clip", displayName: "p", tier: 0, dim: 4, imageSize: nil, contextLength: nil,
+                             minMemoryGB: 0, imageInput: nil, textInput: nil, output: nil, tokenizer: nil, files: list, notes: nil)
+    }
+
+    // Progress is monotonic, reaches the total, and walks the phases in order.
+    @Test func progressIsMonotonicAndPhased() async throws {
+        let home = try tempHome()
+        let m = try manifest(home, files: 3, size: 4096)
+        let rec = Recorder()
+        try await ModelInstaller(home: home).install(m) { rec.add($0) }
+        let ps = rec.all
+        #expect(zip(ps, ps.dropFirst()).allSatisfy { $0.bytesDone <= $1.bytesDone })
+        #expect(ps.last?.bytesDone == m.downloadBytes && ps.last?.phase == .done)
+        let phases = ps.map(\.phase).reduce(into: [InstallProgress.Phase]()) { if $0.last != $1 { $0.append($1) } }
+        #expect(phases == [.downloading, .verifying, .compiling, .done])
+        #expect(ps.allSatisfy { $0.fraction >= 0 && $0.fraction <= 1 })
+    }
+
+    // Cancelling stops the install, leaves no staging files and no installed model; a retry works.
+    @Test func cancelLeavesNothingBehind() async throws {
+        let home = try tempHome()
+        let m = try manifest(home, files: 2, size: 1024)
+        let installer = ModelInstaller(home: home)
+        let task = Task { try await installer.install(m) }
+        task.cancel()
+        await #expect(throws: CancellationError.self) { try await task.value }
+        #expect(try FileManager.default.contentsOfDirectory(atPath: home.tmpURL.path).filter { $0.hasPrefix("model-") }.isEmpty)
+        #expect(!ModelPaths.isInstalled(home: home, model: m))
+        try await installer.install(m)
+        #expect(ModelPaths.isInstalled(home: home, model: m))
+    }
+}
+
+@Suite struct InstallUnderSymlinkedPathTests {
+    // Regression: a data directory under /private/tmp (symlinked /tmp) rejected every legit path.
+    @Test func installsUnderPrivateTmp() async throws {
+        let root = URL(fileURLWithPath: "/private/tmp/clipvault-ptest-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let home = try AppHome(root: root)
+        let src = root.appendingPathComponent("src.bin")
+        try Data("model".utf8).write(to: src)
+        let m = ModelManifest(id: "sym@1", family: "coreml-clip", displayName: "s", tier: 0, dim: 4, imageSize: nil, contextLength: nil,
+                              minMemoryGB: 0, imageInput: nil, textInput: nil, output: nil, tokenizer: nil,
+                              files: [ModelFile(path: "nested/dir/Manifest.json", url: src.absoluteString,
+                                                sha256: try ModelInstaller.sha256(of: src), size: 5)], notes: nil)
+        try await ModelInstaller(home: home).install(m)
+        #expect(ModelPaths.isInstalled(home: home, model: m))
+    }
+}

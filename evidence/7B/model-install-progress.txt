@@ -1,0 +1,3 @@
+# 2026-10-17 real network install, debug build, data dir under /private/tmp
+$ ClipVault --model install mobileclip-s0@1
+104 MB, 26 s, 20 progress updates (downloading 0%→100%, verifying, compiling), exit 0, installed

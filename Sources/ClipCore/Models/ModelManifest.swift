@@ -149,8 +149,11 @@ public enum ModelPaths {
     /// Directory for a validated id; throws instead of resolving outside models/.
     public static func safeDirectory(home: AppHome, id: String) throws -> URL {
         guard isSafeID(id) else { throw ModelPathError.unsafeID(id) }
-        let dir = directory(home: home, id: id).standardizedFileURL
-        guard dir.deletingLastPathComponent().path == home.modelsURL.standardizedFileURL.path else { throw ModelPathError.unsafeID(id) }
+        // Lexical check only: filesystem normalisation differs for existing vs new paths under
+        // symlinked roots such as /private/tmp. isSafeID already excludes "/", "." and "..".
+        let dir = directory(home: home, id: id)
+        guard dir.deletingLastPathComponent().path == home.modelsURL.path || dir.deletingLastPathComponent().path + "/" == home.modelsURL.path
+        else { throw ModelPathError.unsafeID(id) }
         return dir
     }
 

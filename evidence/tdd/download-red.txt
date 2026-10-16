@@ -1,0 +1,4 @@
+Tests/ClipPlatformTests/PlatformTests.swift failed with a nonzero exit code. Command line:     cd /Users/xiaoheng/Program/app
+Tests/ClipPlatformTests/PlatformTests.swift:231:77: [1;31merror: [1;39mtype 'String?' has no member 'done'[0;0m
+Tests/ClipPlatformTests/PlatformTests.swift:232:51: [1;31merror: [1;39mcannot call value of non-function type '[Element]'[0;0m
+Tests/ClipPlatformTests/PlatformTests.swift:232:68: [1;31merror: [1;39mtype 'InstallProgress' has no member 'Phase'[0;0m

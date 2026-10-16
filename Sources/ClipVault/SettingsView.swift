@@ -15,7 +15,8 @@ final class SettingsModel {
     var active: [ModelSlot: String] = [:]
     var coverage: [ModelSlot: SemanticCoverage] = [:]
     var vectorCounts: [String: Int] = [:]
-    var installing: [String: Double] = [:]
+    var installing: [String: InstallProgress] = [:]
+    @ObservationIgnored private var installTasks: [String: Task<Void, Never>] = [:]
     var modelError: String?
     var diagnostics = ""
     var diagnosing = false
@@ -98,17 +99,27 @@ final class SettingsModel {
     // MARK: Models
 
     func install(_ m: ModelManifest) {
-        installing[m.id] = 0
+        installing[m.id] = InstallProgress(modelID: m.id, bytesDone: 0, bytesTotal: m.downloadBytes, phase: .downloading)
         modelError = nil
-        Task {
+        installTasks[m.id] = Task {
             do {
                 try await installer.install(m) { p in
-                    Task { @MainActor in self.installing[m.id] = Double(p.bytesDone) / Double(max(p.bytesTotal, 1)) }
+                    Task { @MainActor in if self.installing[m.id] != nil { self.installing[m.id] = p } }
                 }
-            } catch { modelError = "安装 \(m.displayName) 失败：\(error)" }
+            } catch is CancellationError {
+                modelError = "已取消下载 \(m.displayName)"
+            } catch {
+                modelError = "安装 \(m.displayName) 失败：\(error)"
+            }
             installing[m.id] = nil
+            installTasks[m.id] = nil
             await reload()
         }
+    }
+
+    /// Stops the download; the installer removes its temp files and the model stays "not installed".
+    func cancelInstall(_ m: ModelManifest) {
+        installTasks[m.id]?.cancel()
     }
 
     func activate(_ m: ModelManifest) {
@@ -317,7 +328,11 @@ struct ModelsTab: View {
             }
             Spacer()
             if let p = model.installing[m.id] {
-                ProgressView(value: p).frame(width: 120)
+                VStack(alignment: .trailing, spacing: 2) {
+                    ProgressView(value: p.fraction).frame(width: 140)
+                    Text(Self.progressText(p)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                }
+                Button("取消") { model.cancelInstall(m) }
             } else if !m.isSupportedFamily {
                 Text("不支持").foregroundStyle(.secondary)
             } else if !model.installed(m) {
@@ -328,6 +343,16 @@ struct ModelsTab: View {
                 Button("启用") { model.activate(m) }
                 if m.requiresInstall { Button("删除文件") { model.remove(m) } }
             }
+        }
+    }
+
+    static func progressText(_ p: InstallProgress) -> String {
+        let mb = { (b: Int64) in String(format: "%.0f", Double(b) / 1_048_576) }
+        switch p.phase {
+        case .downloading: return String(format: "下载中 %.0f%% · ", p.fraction * 100) + "\(mb(p.bytesDone)) / \(mb(p.bytesTotal)) MB"
+        case .verifying: return "校验中…"
+        case .compiling: return "编译模型中…"
+        case .done: return "完成"
         }
     }
 
