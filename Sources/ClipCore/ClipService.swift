@@ -261,6 +261,28 @@ public actor ClipService {
                               error: searchError, elapsedMs: Date().timeIntervalSince(started) * 1000)
     }
 
+    // MARK: Similar images
+
+    /// Images similar to a stored image (shown under the image in the detail pane). Uses its stored
+    /// vector in the active image model's space; never returns the image itself.
+    public func similarImages(to id: Int64, limit: Int) async -> SearchResponse {
+        let started = Date()
+        guard let m = active[.image] else { return respond(hits: [], .notEnabled, started) }
+        guard let v = try? await db.embeddingVector(itemID: id, modelID: m.id) else {
+            return respond(hits: [], .failed("这张图片还没有建立 \(m.displayName) 索引"), started)
+        }
+        let r = await engine.similar(to: v, k: limit + 1)
+        let scores = r.hits.filter { $0.id != id }.prefix(limit)
+        let summaries = (try? await reads.summaries(ids: scores.map(\.id))) ?? [:]
+        let hits = scores.compactMap { s in summaries[s.id].map { Hit(item: $0, sources: [.semantic], score: Double(s.score), similarity: s.score) } }
+        return respond(hits: hits, r.status, started)
+    }
+
+    private func respond(hits: [Hit], _ status: SemanticStatus, _ started: Date) -> SearchResponse {
+        SearchResponse(requestID: 0, hits: hits, semantic: status, untranslatedCJK: false, error: nil,
+                       elapsedMs: Date().timeIntervalSince(started) * 1000)
+    }
+
     // MARK: Models
 
     public func activeModelManifest(slot: ModelSlot = .image) -> ModelManifest? { active[slot] }

@@ -64,6 +64,11 @@ extension Database {
         }
     }
 
+    public func embeddingVector(itemID: Int64, modelID: String) throws -> [Float]? {
+        try conn.query("SELECT vec FROM embeddings WHERE item_id = ? AND model_id = ?", [itemID, modelID]) { $0.blob(0) }
+            .first.flatMap { $0 }.map(VectorCodec.decode)
+    }
+
     /// Text used for a document embedding (bounded; H10).
     public func embedText(itemID: Int64, maxChars: Int = 4000) throws -> String? {
         try conn.query("SELECT substr(text, 1, ?) FROM items WHERE id = ?", [maxChars, itemID]) { $0.text(0) }.first ?? nil

@@ -35,7 +35,10 @@ struct ThumbnailView: View {
     let maxPixel: Int
     var body: some View {
         if let img = Thumbnails.shared.image(hash: hash, url: url, maxPixel: maxPixel) {
+            // A thin border so light / borderless images keep a visible edge.
             Image(nsImage: img).resizable().aspectRatio(contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.primary.opacity(0.18), lineWidth: 1))
         } else {
             Image(systemName: "photo").foregroundStyle(.secondary)
         }
@@ -113,6 +116,12 @@ struct PanelView: View {
             List(selection: $model.selection) {
                 ForEach(model.rows) { row in
                     RowView(row: row, service: model.service)
+                        .overlay {
+                            if model.revealed == row.id {
+                                RoundedRectangle(cornerRadius: 6).stroke(Color.accentColor, lineWidth: 2).padding(-3)
+                            }
+                        }
+                        .animation(.easeOut(duration: 0.25), value: model.revealed)
                         .tag(row.id)
                         .onAppear { model.loadMoreIfNeeded(current: row) }
                         .contextMenu {
@@ -129,6 +138,9 @@ struct PanelView: View {
                 if model.rows.isEmpty { emptyState }
             }
             .onChange(of: model.selection) { _, id in if let id { proxy.scrollTo(id) } }
+            .onChange(of: model.scrollRequest?.token) { _, _ in
+                if let id = model.scrollRequest?.id { withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(id, anchor: .center) } }
+            }
             .onTapGesture(count: 2) { model.copySelected() }
         }
     }
@@ -231,6 +243,7 @@ struct PreviewPane: View {
                     if row.item.kind == .image, let h = row.item.blobHash {
                         ThumbnailView(hash: h, url: model.service.blobURL(h), maxPixel: 900)
                             .frame(maxWidth: .infinity, maxHeight: 320)
+                        SimilarStrip(model: model)
                     } else {
                         // Bounded: very large texts show a prefix (full text is still copied).
                         Text(String((detail?.text ?? row.item.preview ?? "").prefix(20_000)))
@@ -259,5 +272,34 @@ struct PreviewPane: View {
         let created = Date(timeIntervalSince1970: Double(s.createdAt) / 1000).formatted(date: .abbreviated, time: .standard)
         let size = ByteCountFormatter.string(fromByteCount: Int64(s.byteSize), countStyle: .file)
         return "首次复制 \(created) · 使用 \(s.useCount) 次 · \(size)" + (s.sourceName.map { " · 来自 \($0)" } ?? "")
+    }
+}
+
+/// Similar images under the detail image. Clicking reveals the row in the list without selecting it.
+struct SimilarStrip: View {
+    let model: PanelModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if !model.similar.isEmpty {
+                Text("相似图片（点击定位到列表）").font(.caption).foregroundStyle(.secondary)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(model.similar) { row in
+                            if let h = row.item.blobHash {
+                                ThumbnailView(hash: h, url: model.service.blobURL(h), maxPixel: 160)
+                                    .frame(width: 72, height: 72)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { model.reveal(row.id) }
+                                    .help(row.similarity.map { String(format: "相似度 %.2f", $0) } ?? "")
+                            }
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+            if let note = model.revealNote ?? model.similarNote {
+                Text(note).font(.caption).foregroundStyle(.secondary)
+            }
+        }
     }
 }

@@ -184,3 +184,29 @@ final class FakeWriter: PasteboardWriting, @unchecked Sendable {
         #expect(c.recommended(memoryGB: 32, slot: .text)?.id == "multilingual-e5-small@1")
     }
 }
+
+@Suite struct SimilarImageTests {
+    var ctx: CaptureContext { CaptureContext(frontmostBundleID: nil, frontmostName: nil, excludedBundleIDs: [], lastSelfWriteChangeCount: nil) }
+    func image(_ seed: UInt8) -> PasteboardSnapshot {
+        PasteboardSnapshot(changeCount: 1, types: ["public.png"], image: CapturedImage(data: pngBytes(seed: seed), uti: "public.png", width: 1, height: 1))
+    }
+
+    // Image → similar images, using the stored vector of the active image model; never returns itself.
+    @Test func similarToStoredImage() async throws {
+        let services = PlatformServices(ocr: FakeOCR(), translator: NoTranslator(), pasteboard: FakeWriter(),
+                                        makeProvider: { m in var e = FakeEmbedder(); e.modelID = m.id; e.dimension = m.dim; return e }, memoryGB: { 16 })
+        let rt = try await Runtime.open(home: try makeTempHome(), services: services, startWorker: false)
+        // No image model: explicit status, no results.
+        guard case .stored(let a, _) = await rt.service.ingest(image(1), context: ctx) else { return }
+        let none = await rt.service.similarImages(to: a, limit: 10)
+        #expect(none.semantic == .notEnabled && none.hits.isEmpty)
+
+        try await rt.service.activateModel(id: "vision-featureprint@1", requireInstalled: false)
+        guard case .stored(let b, _) = await rt.service.ingest(image(2), context: ctx) else { return }
+        _ = await rt.service.ingest(textSnapshot("not an image"), context: ctx)
+        _ = await rt.worker.drain()
+        let r = await rt.service.similarImages(to: a, limit: 10)
+        #expect(r.hits.map(\.id) == [b])
+        #expect(r.hits.first?.sources == [.semantic])
+    }
+}

@@ -30,7 +30,60 @@ final class PanelModel {
 
     func loadDetail(id: Int64) async {
         let d = try? await service.detail(id: id)
-        if selectedRow?.id == id { detail = d }
+        guard selectedRow?.id == id else { return }
+        detail = d
+        similar = []
+        similarNote = nil
+        revealNote = nil
+        guard d?.summary.kind == .image else { return }
+        let r = await service.similarImages(to: id, limit: 8)
+        guard selectedRow?.id == id else { return }         // selection moved on: drop the stale result
+        similar = r.hits.map { Row(item: $0.item, sources: $0.sources, similarity: $0.similarity) }
+        switch r.semantic {
+        case .notEnabled: similarNote = "启用图片搜索模型后可显示相似图片"
+        case .failed(let e): similarNote = e
+        default: similarNote = similar.isEmpty ? "没有相似图片" : nil
+        }
+    }
+
+    // MARK: Similar images → reveal in list (scroll + highlight, without selecting)
+
+    private(set) var similar: [Row] = []
+    private(set) var similarNote: String?
+    /// Row briefly highlighted after a similar-image thumbnail is clicked. Not the selection.
+    private(set) var revealed: Int64?
+    /// Bumped on every reveal so the list scrolls even when revealing the same row twice.
+    private(set) var scrollRequest: (id: Int64, token: Int)?
+    private(set) var revealNote: String?
+    private var revealToken = 0
+
+    func reveal(_ id: Int64) {
+        revealNote = nil
+        Task {
+            if !rows.contains(where: { $0.id == id }) { await loadPages(until: id) }
+            guard rows.contains(where: { $0.id == id }) else {
+                revealNote = phase == .browsing ? "这张图片太早了，不在已加载的列表中（最多 \(Self.maxRowsInMemory) 条）" : "这张图片不在当前搜索结果中"
+                return
+            }
+            revealToken += 1
+            let token = revealToken
+            scrollRequest = (id, token)
+            revealed = id
+            try? await Task.sleep(for: .seconds(1.6))
+            if revealToken == token { revealed = nil }
+        }
+    }
+
+    /// Browsing only: keep paging (bounded by H6) until `id` is loaded.
+    private func loadPages(until id: Int64) async {
+        while phase == .browsing, !reachedEnd, rows.count < Self.maxRowsInMemory, !rows.contains(where: { $0.id == id }), let last = rows.last {
+            let gateID = gate.next()
+            let page = (try? await service.page(after: PageCursor(last.item), kind: kind, limit: Self.pageSize)) ?? []
+            guard gate.accepts(gateID) else { return }
+            let known = Set(rows.map(\.id))
+            rows += page.filter { !known.contains($0.id) }.map { Row(item: $0, sources: [], similarity: nil) }
+            reachedEnd = page.count < Self.pageSize || rows.count >= Self.maxRowsInMemory
+        }
     }
 
     static let pageSize = 60          // H6

@@ -330,12 +330,12 @@ enum BuiltinModels {
   {
    "id": "vision-featureprint@1",
    "family": "vision-featureprint",
-   "displayName": "Apple Vision 特征（以图搜图，无需下载）",
+   "displayName": "Apple Vision 特征（无需下载，仅相似图片）",
    "tier": 0,
    "dim": 768,
    "minMemoryGB": 0,
    "files": [],
-   "notes": "Image-to-image similarity only; cannot answer text queries."
+   "notes": "Similar-image strip only; cannot answer text queries — prefer SigLIP2, which also powers similar images."
   }
  ]
 }

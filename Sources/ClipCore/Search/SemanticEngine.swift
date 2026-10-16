@@ -39,6 +39,13 @@ public actor SemanticEngine {
     public var activeModelID: String? { provider?.modelID }
     public var activeIndex: VectorIndex? { index }
 
+    /// Image → similar images (any image model; vectors live in the same space as the index).
+    public func similar(to vector: [Float], k: Int) async -> SemanticResult {
+        guard let index else { return SemanticResult(status: .notEnabled, hits: []) }
+        let hits = await index.search(VectorCodec.normalized(vector), k: k).map { SemanticScore(id: $0.id, score: $0.score) }
+        return SemanticResult(status: .ready(translated: nil), hits: hits)
+    }
+
     public func search(_ query: String, k: Int) async -> SemanticResult {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let provider, let index else { return SemanticResult(status: .notEnabled, hits: []) }

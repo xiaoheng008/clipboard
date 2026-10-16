@@ -93,9 +93,9 @@ models.append({"id": "multilingual-e5-small@1", "family": "coreml-text-embed", "
                "files": e5_files,
                "notes": "intfloat/multilingual-e5-small (MIT), Core ML conversion by wolfram-pro. Pooling + L2 norm inside the graph."})
 
-models.append({"id": "vision-featureprint@1", "family": "vision-featureprint", "displayName": "Apple Vision 特征（以图搜图，无需下载）",
+models.append({"id": "vision-featureprint@1", "family": "vision-featureprint", "displayName": "Apple Vision 特征（无需下载，仅相似图片）",
                "tier": 0, "dim": 768, "minMemoryGB": 0, "files": [],
-               "notes": "Image-to-image similarity only; cannot answer text queries."})
+               "notes": "Similar-image strip only; cannot answer text queries — prefer SigLIP2, which also powers similar images."})
 
 out = pathlib.Path(__file__).resolve().parent.parent / "Sources/ClipCore/Models/BuiltinModels.swift"
 body = json.dumps({"models": models}, ensure_ascii=False, indent=1)
