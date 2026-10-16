@@ -42,3 +42,23 @@ public enum FileItemPaths {
         return (existing, missing)
     }
 }
+
+/// One-line titles for the history list: trims the ends and collapses runs of whitespace; line breaks
+/// become a single " ⏎ ". Display only — stored content is never changed.
+public enum DisplayText {
+    public static func singleLine(_ text: String) -> String {
+        var out = ""
+        var pendingSpace = false
+        var pendingBreak = false
+        for ch in text {
+            if ch.isNewline { pendingBreak = true; continue }
+            if ch.isWhitespace { pendingSpace = true; continue }
+            if !out.isEmpty {
+                if pendingBreak { out += " ⏎ " } else if pendingSpace { out += " " }
+            }
+            pendingSpace = false; pendingBreak = false
+            out.append(ch)
+        }
+        return out
+    }
+}

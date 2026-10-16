@@ -1,0 +1,1 @@
+Tests/ClipCoreTests/SearchTests.swift failed with a nonzero exit code. Command line:     cd /Users/xiaoheng/Program/app

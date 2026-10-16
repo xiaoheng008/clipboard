@@ -186,3 +186,17 @@ import Testing
         #expect(r.existing.isEmpty && r.missing.isEmpty)
     }
 }
+
+@Suite struct DisplayTextTests {
+    // List titles: trim the ends, collapse runs of blank lines / spaces; stored content is untouched.
+    @Test(arguments: [
+        ("➜  app" + String(repeating: "\n", count: 28), "➜ app"),
+        ("\n\n  hello  \n\n\nworld\n", "hello ⏎ world"),
+        ("a\tb   c", "a b c"),
+        ("   \n\t ", ""),
+        ("一行\r\n二行", "一行 ⏎ 二行"),
+    ])
+    func singleLine(input: String, expected: String) {
+        #expect(DisplayText.singleLine(input) == expected)
+    }
+}

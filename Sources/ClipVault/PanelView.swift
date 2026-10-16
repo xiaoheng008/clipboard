@@ -210,10 +210,10 @@ struct RowView: View {
 
     private var title: String {
         if row.item.kind == .image {
-            if let o = row.item.ocrPreview, !o.isEmpty { return o.replacingOccurrences(of: "\n", with: " ") }
+            if let o = row.item.ocrPreview, !DisplayText.singleLine(o).isEmpty { return DisplayText.singleLine(o) }
             return "图片 \(row.item.width ?? 0)×\(row.item.height ?? 0)"
         }
-        return (row.item.preview ?? "").trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: " ⏎ ")
+        return DisplayText.singleLine(row.item.preview ?? "")
     }
 
     private var meta: String {
@@ -247,20 +247,14 @@ struct PreviewPane: View {
                         SimilarStrip(model: model)
                     } else {
                         // Bounded: very large texts show a prefix (full text is still copied).
-                        Text(Self.linkified(String((detail?.text ?? row.item.preview ?? "").prefix(20_000))))
+                        let body = String((detail?.text ?? row.item.preview ?? "").prefix(20_000))
+                        // Plain text normally; while ⌘ is held, links / existing file paths become blue and clickable.
+                        Text(model.commandDown ? (row.item.kind == .file ? Self.fileLinked(body) : Self.linkified(body)) : AttributedString(body))
                             .font(.system(size: 12, design: .monospaced))
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        if row.item.kind == .url, let url = LinkDetector.safeURL(detail?.text ?? row.item.preview ?? "") {
-                            Button { model.openLink(url) } label: { Label("在浏览器中打开", systemImage: "safari") }
-                        }
                         if row.item.kind == .file {
-                            let files = FileItemPaths.resolve(text: detail?.text ?? row.item.preview ?? "")
-                            if !files.existing.isEmpty {
-                                Button { model.revealInFinder(files.existing) } label: {
-                                    Label(files.existing.count > 1 ? "在访达中显示（\(files.existing.count) 个文件）" : "在访达中显示", systemImage: "folder")
-                                }
-                            }
+                            let files = FileItemPaths.resolve(text: body)
                             if !files.missing.isEmpty {
                                 Text(files.existing.isEmpty ? "文件已不存在（可能已被移动或删除）" : "\(files.missing.count) 个文件已不存在")
                                     .font(.caption).foregroundStyle(.secondary)
@@ -281,9 +275,16 @@ struct PreviewPane: View {
                 .padding(12)
                 .task(id: row.id) { await model.loadDetail(id: row.id) }
                 // FR21: clicked links open in the default browser and the panel gets out of the way.
+                // FR21 / FR22: only ⌘-click opens; a plain click just places the text cursor / selection.
                 .environment(\.openURL, OpenURLAction { url in
-                    guard LinkDetector.safeURL(url.absoluteString) != nil else { return .discarded }
-                    model.openLink(url)
+                    guard NSEvent.modifierFlags.contains(.command) else { return .handled }
+                    if url.isFileURL {
+                        guard FileManager.default.fileExists(atPath: url.path) else { return .handled }
+                        model.revealInFinder([url])
+                    } else {
+                        guard LinkDetector.safeURL(url.absoluteString) != nil else { return .discarded }
+                        model.openLink(url)
+                    }
                     return .handled
                 })
             }
@@ -296,6 +297,21 @@ struct PreviewPane: View {
         guard !links.isEmpty else { return AttributedString(text) }
         let ns = NSMutableAttributedString(string: text)
         for l in links { ns.addAttribute(.link, value: l.url, range: NSRange(l.range, in: text)) }
+        return AttributedString(ns)
+    }
+
+    /// File items: each existing path becomes a file:// link (⌘-click reveals it in Finder).
+    static func fileLinked(_ text: String) -> AttributedString {
+        let ns = NSMutableAttributedString(string: text)
+        var location = 0
+        for line in text.components(separatedBy: "\n") {
+            let length = (line as NSString).length
+            let path = line.trimmingCharacters(in: .whitespaces)
+            if path.hasPrefix("/"), FileManager.default.fileExists(atPath: path) {
+                ns.addAttribute(.link, value: URL(fileURLWithPath: path), range: NSRange(location: location, length: length))
+            }
+            location += length + 1
+        }
         return AttributedString(ns)
     }
 

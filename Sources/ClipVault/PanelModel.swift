@@ -195,6 +195,26 @@ final class PanelModel {
 
     // MARK: Actions
 
+    /// FR21/22: links and file paths are plain text; while ⌘ is held they turn into blue, clickable links.
+    private(set) var commandDown = false
+    @ObservationIgnored private var flagsMonitor: Any?
+
+    private func startWatchingCommandKey() {
+        stopWatchingCommandKey()
+        commandDown = NSEvent.modifierFlags.contains(.command)
+        flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] e in
+            let down = e.modifierFlags.contains(.command)
+            if self?.commandDown != down { self?.commandDown = down }
+            return e
+        }
+    }
+
+    private func stopWatchingCommandKey() {
+        if let m = flagsMonitor { NSEvent.removeMonitor(m) }
+        flagsMonitor = nil
+        commandDown = false
+    }
+
     /// FR22: open Finder at the files' folder with the files selected, then close the panel.
     func revealInFinder(_ urls: [URL]) {
         NSWorkspace.shared.activateFileViewerSelecting(urls)
@@ -270,11 +290,13 @@ final class PanelModel {
     }
 
     func panelWillClose() {
+        stopWatchingCommandKey()
         gate.invalidate()            // responses arriving after close are dropped
         debounce?.cancel()
     }
 
     func panelDidOpen() {
+        startWatchingCommandKey()
         query = ""
         kind = .all
         selection = nil
