@@ -21,6 +21,7 @@ enum CLI {
       --gc       (--dry-run | --only <blob-hash> | --all)
       --model list | recommend | install <id> | activate <id> | deactivate [image|text] | remove <id>
       --model purge-inactive (--dry-run | --only <model-id> | --all)
+      --model threshold <id> [--floor X] [--margin Y] | --reset     semantic match strictness (FR24)
       --bench [--items N] [--images N] [--dim N]   synthetic benchmark in a temporary home
       --login-item status | on | off     launch at login (off by default)
       --slow-ops [--limit N]             slowest button / shortcut actions (1000 kept)
@@ -308,6 +309,21 @@ enum CLI {
             if await rt.service.activeModelManifest(slot: catalog.model(id: id)?.slot ?? .image)?.id == id { throw CLIError.usage("\(id) is active; deactivate or activate another first") }
             try await ModelInstaller(home: rt.home).remove(id)
             print("removed files of \(id) (vectors kept; see --model purge-inactive)")
+            return 0
+        case "threshold":
+            let pos = try check(rest, allowed: ["--reset"], valued: ["--floor", "--margin"], positional: 1)
+            guard let id = pos.first else { throw CLIError.usage("threshold needs a model id") }
+            if rest.contains("--reset") {
+                try await rt.service.setSemanticThresholds(modelID: id, floor: nil, margin: nil)
+            } else if rest.contains("--floor") || rest.contains("--margin") {
+                let cur = await rt.service.semanticThresholds(modelID: id)
+                guard let f = Float(try option(rest, "--floor") ?? String(cur.floor)), let g = Float(try option(rest, "--margin") ?? String(cur.margin)) else {
+                    throw CLIError.usage("--floor / --margin need numbers")
+                }
+                try await rt.service.setSemanticThresholds(modelID: id, floor: f, margin: g)
+            }
+            let t = await rt.service.semanticThresholds(modelID: id)
+            print(String(format: "%@  floor=%.3f  margin=%.3f%@", id, t.floor, t.margin, t.isDefault ? "  (default)" : ""))
             return 0
         case "purge-inactive":
             let scope = try MaintenanceScope.parse(rest)

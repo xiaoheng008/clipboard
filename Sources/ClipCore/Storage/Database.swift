@@ -301,6 +301,12 @@ public actor Database {
 
     // MARK: Settings
 
+    public func settings(prefix: String) throws -> [String: String] {
+        Dictionary(uniqueKeysWithValues: try conn.query("SELECT key, value FROM settings WHERE substr(key, 1, ?) = ?", [prefix.count, prefix]) {
+            ($0.text(0) ?? "", $0.text(1) ?? "")
+        })
+    }
+
     public func setting(_ key: String) throws -> String? {
         try conn.query("SELECT value FROM settings WHERE key = ?", [key]) { $0.text(0) }.first ?? nil
     }

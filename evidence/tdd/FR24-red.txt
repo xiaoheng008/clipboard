@@ -1,0 +1,3 @@
+Tests/ClipCoreTests/ClipServiceTests.swift failed with a nonzero exit code. Command line:     cd /Users/xiaoheng/Program/app
+Tests/ClipCoreTests/ClipServiceTests.swift:319:34: [1;31merror: [1;39mvalue of type 'ClipService' has no member 'semanticThresholds'[0;0m
+Tests/ClipCoreTests/ClipServiceTests.swift:319:92: [1;31merror: [1;39mcannot find 'SemanticThresholds' in scope[0;0m

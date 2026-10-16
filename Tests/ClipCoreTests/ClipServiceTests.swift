@@ -287,3 +287,45 @@ final class EventLog: @unchecked Sendable {
     func append(_ e: ClipEvent) { lock.lock(); events.append(e); lock.unlock() }
     var all: [ClipEvent] { lock.lock(); defer { lock.unlock() }; return events }
 }
+
+@Suite struct SemanticThresholdTests {
+    var ctx: CaptureContext { CaptureContext(frontmostBundleID: nil, frontmostName: nil, excludedBundleIDs: [], lastSelfWriteChangeCount: nil) }
+
+    /// Embeds every text to the same direction, scaled: similarity to the query = per-text weight.
+    struct ScoredEmbedder: EmbeddingProvider {
+        var modelID = "multilingual-e5-small@1"
+        var dimension = 384
+        let capabilities = EmbeddingCapabilities(image: false, text: true)
+        func embed(imageAt url: URL) async throws -> [Float] { throw ProviderError.unsupported("x") }
+        func embed(text: String) async throws -> [Float] { [1] + [Float](repeating: 0, count: dimension - 1) }
+        func embed(document: String) async throws -> [Float] {
+            let s: Float = document.contains("近") ? 0.95 : (document.contains("中") ? 0.90 : 0.80)   // cosine with the query
+            return [s, (1 - s * s).squareRoot()] + [Float](repeating: 0, count: dimension - 2)
+        }
+    }
+
+    // AC24.1 — overrides change results immediately, persist, and can be reset to the manifest default.
+    @Test func overrideAndReset() async throws {
+        let home = try makeTempHome()
+        let services = PlatformServices(ocr: nil, translator: NoTranslator(), pasteboard: FakeWriter(),
+                                        makeProvider: { _ in ScoredEmbedder() }, memoryGB: { 16 })
+        let rt = try await Runtime.open(home: home, services: services, startWorker: false, requireInstalledModel: false)
+        try await rt.service.activateModel(id: "multilingual-e5-small@1", requireInstalled: false)
+        for t in ["很近的句子", "中等的句子", "很远的句子"] { _ = await rt.service.ingest(textSnapshot(t), context: ctx) }
+        _ = await rt.worker.drain()
+        func semanticCount() async -> Int {
+            await rt.service.search(SearchRequest(requestID: 1, text: "zzzz", kind: .text, semantic: true, limit: 10)).hits.count
+        }
+        #expect(await rt.service.semanticThresholds(modelID: "multilingual-e5-small@1") == SemanticThresholds(floor: 0.84, margin: 0.012, isDefault: true))
+        #expect(await semanticCount() == 1)                                    // default: only 0.95
+        try await rt.service.setSemanticThresholds(modelID: "multilingual-e5-small@1", floor: 0.85, margin: 0.10)
+        #expect(await semanticCount() == 2)                                    // 0.95 and 0.90
+        let rt2 = try await Runtime.open(home: home, services: services, startWorker: false, requireInstalledModel: false, sweepTmp: false)
+        #expect(await rt2.service.semanticThresholds(modelID: "multilingual-e5-small@1") == SemanticThresholds(floor: 0.85, margin: 0.10, isDefault: false))
+        try await rt.service.setSemanticThresholds(modelID: "multilingual-e5-small@1", floor: nil, margin: nil)
+        #expect(await semanticCount() == 1)
+        await #expect(throws: ServiceError.self) { try await rt.service.setSemanticThresholds(modelID: "multilingual-e5-small@1", floor: 1.5, margin: 0.1) }
+        await #expect(throws: ServiceError.self) { try await rt.service.setSemanticThresholds(modelID: "multilingual-e5-small@1", floor: 0.5, margin: -0.1) }
+        await #expect(throws: ServiceError.self) { try await rt.service.setSemanticThresholds(modelID: "nope@1", floor: 0.5, margin: 0.1) }
+    }
+}

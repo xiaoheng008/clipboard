@@ -58,6 +58,14 @@ public struct SearchResponse: Sendable, Equatable {
     public var elapsedMs: Double
 }
 
+/// FR24 — effective relative-filter thresholds for a model (H5); isDefault = no user override.
+public struct SemanticThresholds: Sendable, Equatable {
+    public var floor: Float
+    public var margin: Float
+    public var isDefault: Bool
+    public init(floor: Float, margin: Float, isDefault: Bool) { self.floor = floor; self.margin = margin; self.isDefault = isDefault }
+}
+
 /// FR23 — model slot state machine (3.4 §2). previous keeps serving search while a new model loads.
 public enum ModelSlotState: Sendable, Equatable {
     case inactive
@@ -69,6 +77,7 @@ public enum ModelSlotState: Sendable, Equatable {
 public enum ServiceError: Error, CustomStringConvertible {
     case unknownModel(String), modelNotInstalled(String), unsupportedFamily(String), notFound(Int64)
     case slotBusy(String)
+    case invalidThreshold(String)
     public var description: String {
         switch self {
         case .unknownModel(let m): "Unknown model \(m)"
@@ -76,6 +85,7 @@ public enum ServiceError: Error, CustomStringConvertible {
         case .unsupportedFamily(let f): "Unsupported model family \(f)"
         case .notFound(let id): "Item \(id) not found"
         case .slotBusy(let m): "正在启用 \(m)，请稍候"
+        case .invalidThreshold(let s): "阈值无效：\(s)"
         }
     }
 }
@@ -85,6 +95,9 @@ public enum SettingKey {
     public static let activeTextModel = "active_text_model"
     public static let hotkey = "hotkey"
     public static let excludedApps = "excluded_apps"
+    /// FR24 per-model overrides: "semantic_floor:<model id>", "semantic_margin:<model id>".
+    public static let semanticFloorPrefix = "semantic_floor:"
+    public static let semanticMarginPrefix = "semantic_margin:"
 }
 
 /// The business façade. UI and CLI go through here; nothing else mutates storage.
@@ -120,6 +133,35 @@ public actor ClipService {
     public private(set) var activationError: String?
     private var slotErrors: [ModelSlot: String] = [:]
     private var slotStates: [ModelSlot: ModelSlotState] = [:]
+    private var floorOverrides: [String: Float] = [:]
+    private var marginOverrides: [String: Float] = [:]
+
+    func loadThresholdOverrides() async {
+        func parse(_ prefix: String) async -> [String: Float] {
+            let raw = (try? await db.settings(prefix: prefix)) ?? [:]
+            return Dictionary(uniqueKeysWithValues: raw.compactMap { k, v in Float(v).map { (String(k.dropFirst(prefix.count)), $0) } })
+        }
+        floorOverrides = await parse(SettingKey.semanticFloorPrefix)
+        marginOverrides = await parse(SettingKey.semanticMarginPrefix)
+    }
+
+    public func semanticThresholds(modelID: String) -> SemanticThresholds {
+        let m = catalog.model(id: modelID)
+        let f = floorOverrides[modelID], g = marginOverrides[modelID]
+        return SemanticThresholds(floor: f ?? m?.floor ?? 0.1, margin: g ?? m?.margin ?? 0.06, isDefault: f == nil && g == nil)
+    }
+
+    /// nil resets that value to the manifest default. floor ∈ [-1, 1], margin ∈ [0, 1].
+    public func setSemanticThresholds(modelID: String, floor: Float?, margin: Float?) async throws {
+        guard catalog.model(id: modelID) != nil else { throw ServiceError.unknownModel(modelID) }
+        if let floor, !(-1...1).contains(floor) { throw ServiceError.invalidThreshold("下限需在 -1 到 1 之间") }
+        if let margin, !(0...1).contains(margin) { throw ServiceError.invalidThreshold("差距需在 0 到 1 之间") }
+        try await db.setSetting(SettingKey.semanticFloorPrefix + modelID, floor.map { String($0) })
+        try await db.setSetting(SettingKey.semanticMarginPrefix + modelID, margin.map { String($0) })
+        floorOverrides[modelID] = floor
+        marginOverrides[modelID] = margin
+        Log.shared.event("model.thresholds", ["model": .label(modelID), "floor": .double(Double(floor ?? .nan)), "margin": .double(Double(margin ?? .nan))])
+    }
     public func slotState(_ slot: ModelSlot) -> ModelSlotState { slotStates[slot] ?? .inactive }
     /// Whether activation requires installed model files (false only in tests).
     var requireInstalledModels = true
@@ -139,6 +181,7 @@ public actor ClipService {
         if let json = try? await db.setting(SettingKey.excludedApps), let arr = try? JSONDecoder().decode([String].self, from: Data(json.utf8)) {
             excluded = Set(arr)
         }
+        await loadThresholdOverrides()
     }
 
     public func setChangeHandler(_ h: (@Sendable (ClipEvent) -> Void)?) { changeHandler = h }
@@ -289,7 +332,8 @@ public actor ClipService {
                 guard let manifest = active[slot] else { continue }
                 let r = await engine(slot).search(req.text, k: max(req.limit, 50))
                 if !reported || slot == .image { status = r.status; untranslated = r.untranslatedCJK; reported = true }
-                let kept = req.rawSemantic ? r.hits : SemanticFilter.apply(r.hits, floor: manifest.floor, margin: manifest.margin)
+                let th = semanticThresholds(modelID: manifest.id)      // FR24: user overrides, else manifest defaults
+                let kept = req.rawSemantic ? r.hits : SemanticFilter.apply(r.hits, floor: th.floor, margin: th.margin)
                 if !kept.isEmpty, let summaries = try? await reads.summaries(ids: kept.map(\.id)) {
                     semanticHits += kept.compactMap { s in summaries[s.id].map { SemanticHit(item: $0, score: s.score) } }
                 }
@@ -402,6 +446,7 @@ public actor ClipService {
     /// R8: another process (the CLI) may have changed the active models or written vectors.
     /// Called periodically by the app; cheap when nothing changed.
     public func syncWithStore() async {
+        await loadThresholdOverrides()
         for slot in ModelSlot.allCases {
             let stored = try? await db.setting(Self.settingKey(slot))
             if stored != active[slot]?.id {

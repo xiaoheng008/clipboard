@@ -17,6 +17,10 @@ final class SettingsModel {
     var slotStates: [ModelSlot: ModelSlotState] = [:]
     var coverage: [ModelSlot: SemanticCoverage] = [:]
     var vectorCounts: [String: Int] = [:]
+    /// FR24: effective thresholds of the active models, and the values being dragged.
+    var thresholds: [String: SemanticThresholds] = [:]
+    var floorDraft: [String: Double] = [:]
+    var marginDraft: [String: Double] = [:]
     var installing: [String: InstallProgress] = [:]
     var diagnostics = ""
     var purgeInfo: String?
@@ -58,6 +62,22 @@ final class SettingsModel {
             if let id = active[slot] { coverage[slot] = try? await rt.service.coverage(modelID: id) } else { coverage[slot] = nil }
         }
         vectorCounts = (try? await rt.service.embeddingCounts()) ?? [:]
+        for id in active.values {
+            let t = await rt.service.semanticThresholds(modelID: id)
+            thresholds[id] = t
+            floorDraft[id] = Double(t.floor)
+            marginDraft[id] = Double(t.margin)
+        }
+    }
+
+    func saveThresholds(_ id: String) async throws {
+        try await rt.service.setSemanticThresholds(modelID: id, floor: floorDraft[id].map { Float($0) }, margin: marginDraft[id].map { Float($0) })
+        await reload()
+    }
+
+    func resetThresholds(_ id: String) async throws {
+        try await rt.service.setSemanticThresholds(modelID: id, floor: nil, margin: nil)
+        await reload()
     }
 
     // MARK: Hotkey
@@ -334,6 +354,7 @@ struct ModelsTab: View {
             if let e = model.tracker.message("settings.model.activate.\(slot.rawValue)") ?? model.tracker.message("settings.model.deactivate.\(slot.rawValue)") {
                 Text(e).foregroundStyle(.red).font(.caption)
             }
+            if let id = model.active[slot], let m = model.catalog.first(where: { $0.id == id }) { thresholdEditor(m) }
             ForEach(model.catalog.filter { $0.slot == slot }) { m in row(m) }
         }
     }
@@ -382,6 +403,42 @@ struct ModelsTab: View {
                 }
             }
         }
+    }
+
+    /// FR24: how strict semantic matches are for the active model (H5 relative filter).
+    @ViewBuilder private func thresholdEditor(_ m: ModelManifest) -> some View {
+        let id = m.id
+        let floorRange = max(-1, Double(m.floor) - 0.25)...min(1, Double(m.floor) + 0.15)
+        let marginRange = 0.0...max(0.15, Double(m.margin) * 4)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("相似度下限").frame(width: 120, alignment: .leading)
+                Slider(value: Binding(get: { model.floorDraft[id] ?? Double(m.floor) }, set: { model.floorDraft[id] = $0 }),
+                       in: floorRange, step: 0.005) { editing in if !editing { save(id) } }
+                Text(String(format: "%.3f", model.floorDraft[id] ?? Double(m.floor))).monospacedDigit().frame(width: 48)
+            }
+            HStack {
+                Text("与最佳结果最大差距").frame(width: 120, alignment: .leading)
+                Slider(value: Binding(get: { model.marginDraft[id] ?? Double(m.margin) }, set: { model.marginDraft[id] = $0 }),
+                       in: marginRange, step: 0.002) { editing in if !editing { save(id) } }
+                Text(String(format: "%.3f", model.marginDraft[id] ?? Double(m.margin))).monospacedDigit().frame(width: 48)
+            }
+            HStack {
+                Text("默认 下限 \(String(format: "%.3f", m.floor)) · 差距 \(String(format: "%.3f", m.margin))。下限越低、差距越大，返回的语义结果越多（也越可能不相关）。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                if model.thresholds[id]?.isDefault == false {
+                    TrackedButton("恢复默认", tracker: model.tracker, key: "settings.model.thresholds.reset.\(id)", name: "settings.model.thresholds.reset", detail: id) {
+                        try await model.resetThresholds(id)
+                    }
+                }
+            }
+            if let e = model.tracker.message("settings.model.thresholds.\(id)") { Text(e).foregroundStyle(.red).font(.caption) }
+        }
+    }
+
+    private func save(_ id: String) {
+        model.tracker.perform(key: "settings.model.thresholds.\(id)", name: "settings.model.thresholds", detail: id) { try await model.saveThresholds(id) }
     }
 
     static func progressText(_ p: InstallProgress) -> String {
