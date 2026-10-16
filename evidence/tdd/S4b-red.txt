@@ -1,0 +1,2 @@
+Tests/ClipCoreTests/ClipServiceTests.swift:18:71: [1;31merror: [1;39mcannot find type 'Runtime' in scope[0;0m
+Tests/ClipCoreTests/ClipServiceTests.swift:5:25: [1;31merror: [1;39mcannot find type 'PasteboardWriting' in scope[0;0m

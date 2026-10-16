@@ -1,0 +1,111 @@
+# Phase 2 — 概要设计：方案对比与架构
+
+> 状态：**用户于 2026-10-17 选定方案 C**。
+
+## 方案对比
+
+三个方案都满足：纯本地、SQLite 为条目唯一真相、FTS5 文本搜索、启动断言权限、`--diagnose`。差别在**图片/向量存储与可插拔程度**。
+
+### 方案 A — 最小改动：单库 + 系统能力
+
+- 图片作为 BLOB 直接存 SQLite（单一事务，零补偿）。
+- 搜图只用 Vision：OCR + `VNClassifyImageRequest` 标签进 FTS；`VNGenerateImageFeaturePrint` 做「以图搜相似图」。
+- **不做以文搜图的语义模型**，不做可插拔层。
+- 优点：最简单，零下载，体积小。缺点：不满足「以文搜图」和「按机器换模型」；大图塞进库导致库膨胀、备份慢。
+
+### 方案 B — 结构最干净：多进程 + 动态插件
+
+- 主 App + 独立索引进程（XPC / LaunchAgent），崩溃隔离。
+- 插件为动态加载的 bundle（dlopen），第三方可写新 Embedding/索引后端。
+- 向量存 mmap 平面文件 + HNSW，图片内容寻址文件。
+- 优点：隔离最好、扩展最彻底。缺点：无 Xcode 下 XPC/插件签名打包复杂；跨进程事务与对账显著增加；MVP 周期长。
+
+### 方案 C — 务实折中（推荐）：单进程 + 协议化后端注册表
+
+- **SQLite（WAL）是条目、文本、OCR、标签、向量、任务队列、设置的唯一真相**；条目 + FTS + 索引任务**同一事务**入库。
+- 图片：**内容寻址文件**（`blobs/ab/abcdef…`，sha256 命名），先写临时文件 → fsync → 原子 rename → 再提交 DB 事务。孤儿文件无害，由 `gc` 工具（dry-run → only → all）回收。这是可验证的补偿，且只有这一处。
+- 可插拔层（同进程，协议 + 注册表）：
+  - `EmbeddingProvider`：MobileCLIP S0/S1/S2/B（Core ML，**由 JSON 模型清单描述，新增同类模型不改代码**）、Apple Vision FeaturePrint（仅以图搜图，零下载兜底）。
+  - `VectorIndex`：暴力检索（Accelerate，fp16）先行；HNSW 等以同协议后补。
+  - `OCRProvider`（Vision）、`QueryTranslator`（Apple Translation / 不翻译）。
+  - `HardwareProfile` → 推荐模型档位（纯函数：芯片 + 内存 → S0/S2/B）。
+- 向量按 `(item_id, model_id)` 存：切换模型不删旧向量，后台回填新模型，界面显示覆盖率。
+- 优点：满足全部诉求，复杂度可控，扩展点明确。缺点：插件仍需重新编译（非运行时第三方插件）；单进程下模型推理在后台优先级队列，崩溃隔离弱于 B。
+
+### 对比表
+
+| 维度 | A 最小 | B 最干净 | C 折中 |
+|---|---|---|---|
+| 以文搜图 | ✗ | ✓ | ✓ |
+| 按机器切换模型 | ✗ | ✓ 运行时插件 | ✓ 清单 + 编译期注册 |
+| 复合写原子性 | 单事务 | 跨进程，需对账 | 单事务 + 一处文件补偿（gc） |
+| 进程被杀恢复 | 简单 | 两个进程各自恢复 | 任务表 running→pending |
+| 无 Xcode 可交付 | ✓ | 风险高 | ✓ |
+| 包内值 | 无秘密 | 无秘密 | 无秘密（只有公开的模型 URL + sha256） |
+| 首个 MVP 工作量 | 小 | 大 | 中 |
+
+**推荐 C**：它是唯一同时满足「以文搜图」「可换底层」「无 Xcode 可交付」的方案；B 的进程隔离收益在纯本地单用户场景不抵其事务与打包成本，可在 C 的协议边界稳定后再演进。
+
+---
+
+## 选定架构（方案 C）
+
+### 进程与入口
+
+一个可执行文件 `ClipVault`，两种入口（铁律 7、24a）：
+
+| 入口 | 触发者 | 做什么 |
+|---|---|---|
+| 无参数启动（.app 双击 / 登录项） | 用户 / launchd | 菜单栏 App：剪贴板监听 + 索引执行器 + 面板 + 设置 |
+| `ClipVault --diagnose` 等 CLI 子命令 | 工程师 / 脚本 | 不起 UI，跑同一套运行时，打印结果，FAIL 非 0 退出 |
+
+CLI 子命令（未知参数直接失败）：`--diagnose`、`--search <q>`、`--import <file>`、`--run-jobs`、`--reindex`、`--gc`、`--verify`、`--model list|recommend|install|activate|remove|purge-inactive`、`--bench`、`--export-logs`、`--version`。
+
+### 磁盘布局（根目录 `~/Library/Application Support/ClipVault`，可用环境变量 `CLIPVAULT_HOME` 覆盖，测试与 bench 用）
+
+```
+clipvault.sqlite (+ -wal, -shm)   条目、文本、OCR、标签、向量、任务、设置 —— 唯一真相
+blobs/ab/<sha256>                 图片原始字节（内容寻址，写入后不可变）
+thumbs/ab/<sha256>.jpg            缩略图（派生，可删可重建）
+models/<modelId>/                 已安装模型（.mlmodelc、分词器、install.json）
+tmp/                              下载与写入的临时文件（启动时清理）
+logs/clipvault.log[.1,.2]         滚动日志（脱敏）
+```
+
+### 数据流
+
+```
+NSPasteboard ──poll changeCount──▶ ClipboardWatcher(main)
+     │ 读取表示（PasteboardSnapshot，纯值）
+     ▼
+CaptureDecision（纯函数：跳过/自写/隐私/排除App/分类/规范化/哈希）
+     ▼
+BlobStore.put（tmp → fsync → rename）  ──▶  Database.ingest 事务 {
+                                              upsert item（按 content_hash 去重）
+                                              FTS 行
+                                              入队 index_jobs（vision、embed:<activeModel>）}
+     ▼                                              │
+面板（Database 读连接，分页）                       ▼
+                                         IndexWorker（后台，租约认领）
+                                              ├─ OCRProvider + Labeler → 事务{写 ocr/labels, 更新 FTS, 删任务}
+                                              └─ EmbeddingProvider → 事务{写 embeddings, 删任务} → VectorIndex.add
+搜索：QueryPlanner（纯）→ FTS/LIKE ┐
+      Translator → TextEncoder → VectorIndex.search ┘→ RankFusion（纯）→ 面板
+```
+
+### 可插拔点（扩展边界）
+
+| 协议 | 已有实现 | 选择方式 | 新增实现需要 |
+|---|---|---|---|
+| `EmbeddingProvider` | `CoreMLCLIPProvider`（MobileCLIP S0/S1/S2/B，任意同签名 CLIP 类 Core ML 模型）、`VisionFeaturePrintProvider`（仅以图搜图，零下载） | 设置页 / `--model activate` | 同签名 Core ML 模型：**只加清单 JSON**；新架构：实现协议并在 `ProviderRegistry` 注册 |
+| `VectorIndex` | `FlatVectorIndex`（fp16 存储，Accelerate 批量点积） | 编译期注册，按 `settings.vector_index` 选 | 实现协议（如 HNSW） |
+| `OCRProvider` | `VisionOCR` | 固定 | 实现协议 |
+| `QueryTranslator` | `AppleTranslator`（zh→en）、`NoTranslator` | 自动（语言包可用则用） | 实现协议 |
+| 模型清单 | 内置 `models.json` + 用户 `models/custom.json` | 合并 | 写 JSON |
+
+### 取舍记录
+
+- **向量存 SQLite 而非独立向量库**：保证与条目同生命周期（删除级联）、单一备份点；内存索引是可重建缓存。代价：启动时加载（10 万图 ≈ 100 MB fp16，A5 实测）。
+- **图片存文件而非 BLOB**：避免库膨胀，代价是一处补偿（孤儿文件 gc）。不变量「有条目 ⇒ 有文件」靠写入顺序保证。
+- **单写者**：所有写走 `Database` actor 的一个连接；读走独立只读连接（WAL 并发读）。CLI 与 App 同时运行时靠 SQLite 文件锁 + `busy_timeout`，任务靠租约防重复处理且结果写入幂等。
+- **不做 View→VM→UseCase→Repo 分层**：面板直接持有一个 `PanelModel`（UI 状态 + 调用 `ClipService`），`ClipService` 是唯一业务入口。

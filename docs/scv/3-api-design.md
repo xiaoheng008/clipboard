@@ -1,0 +1,61 @@
+# Phase 3 — 内部 API（扩展边界）
+
+> 契约：协议签名改动需同步所有实现与 `ProviderRegistry`。
+
+```swift
+// ClipCore/Index/Protocols.swift
+public struct EmbeddingCapabilities: Sendable { public let image: Bool; public let text: Bool }
+
+public protocol EmbeddingProvider: Sendable {
+    var modelID: String { get }          // 含版本，如 "mobileclip-s2@1"
+    var dimension: Int { get }
+    var capabilities: EmbeddingCapabilities { get }
+    func embed(imageAt url: URL) async throws -> [Float]      // L2 归一化
+    func embed(text: String) async throws -> [Float]          // 不支持时抛 .unsupported
+}
+
+public protocol OCRProvider: Sendable {
+    func recognize(imageAt url: URL) async throws -> VisionResult   // text + labels
+}
+
+public protocol QueryTranslator: Sendable {
+    func toEnglish(_ text: String) async -> String?    // 不可用返回 nil（不抛），调用方降级
+}
+
+public protocol VectorIndex: Sendable {
+    var modelID: String { get async }
+    var count: Int { get async }
+    func replaceAll(ids: [Int64], vectors: Data, dim: Int) async      // fp16
+    func upsert(id: Int64, vector: [Float]) async
+    func remove(ids: [Int64]) async
+    func search(_ query: [Float], k: Int, allow: Set<Int64>?) async -> [(id: Int64, score: Float)]
+}
+```
+
+`ProviderRegistry`（ClipPlatform）：`family` → 工厂。`coreml-clip` → `CoreMLCLIPProvider(manifest, installDir)`；`vision-featureprint` → `VisionFeaturePrintProvider()`。未知 family：清单中保留但不可激活，诊断 WARN。
+
+## ClipService（业务门面，UI 与 CLI 共用）
+
+```swift
+func ingest(_ s: PasteboardSnapshot, context: CaptureContext) async -> IngestOutcome   // .stored(id,new) / .touched(id) / .skipped(reason) / .failed(error)
+func copyBack(id: Int64) async throws          // 写剪贴板 + touch
+func setPinned(id: Int64, _ on: Bool) async throws
+func delete(id: Int64) async throws
+func clearAll() async throws                    // Q4：含置顶
+func search(_ q: SearchRequest) async -> SearchResponse
+func page(after: Cursor?, kind: KindFilter, limit: Int) async throws -> [ItemSummary]
+func activateModel(_ id: String) async throws  // 校验已安装 → settings → 加载索引 → 回填入队
+```
+
+## 搜索请求 / 响应
+
+```swift
+struct SearchRequest { requestID: UInt64; text: String; kind: KindFilter; semantic: Bool; limit: Int }
+struct SearchResponse { requestID; hits: [Hit]; semantic: SemanticStatus; elapsedMs: Double }
+struct Hit { item: ItemSummary; sources: Set<MatchSource> /* .text .ocr .label .semantic */; score: Double }
+```
+
+融合规则（纯函数 `RankFusion.fuse`，阈值 H5 可调）：
+1. 文本命中按 `pinned DESC, last_used_at DESC` 排名 r_t；语义命中按相似度排名 r_s，相似度 < H5 丢弃。
+2. 分数 = Σ 1/(60 + r)（RRF），同一条目多来源累加并合并 `sources`。
+3. 按分数降序，相同分数按 last_used_at 降序；截断到 limit。

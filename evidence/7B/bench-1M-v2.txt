@@ -1,0 +1,5 @@
+bench home: <tmpdir>/clipvault-bench-CD3A94DB-DF78-4FD1-A207-49764EDC2A17
+  inserted 100000/1000000 (31s)
+  inserted 200000/1000000 (64s)
+  inserted 300000/1000000 (98s)
+  inserted 400000/1000000 (132s)

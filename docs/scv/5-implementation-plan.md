@@ -1,0 +1,26 @@
+# Phase 5 — 实施方案
+
+## gap 盘点
+
+| 必答 | 结论 |
+|---|---|
+| 组件是否已存在？ | 否。空仓库（`ls -la` 只有 `.gitignore` 与 docs）。全部新写。 |
+| 状态 / key 两端 | 见 `3-state-model.md`「状态 / key 两端」，实现时逐项对照。 |
+| 契约 | SQLite schema、模型清单、fp16 编码、自写标记（`2-data-contracts.md`）。无服务端契约。 |
+| 平台限制与权限 | 剪贴板隐私（`accessBehavior`，15.4+）；Translation `installedSource` 需 macOS 26+（< 26 降级为不翻译）；无 Xcode → 无 XCTest，用 Swift Testing；ad-hoc 签名。无需辅助功能（Q3）。 |
+| 真缺 | 全部。无服务端依赖 → 无 gap 上报项。 |
+
+子代理说明：仓库为空，gap 盘点的四个维度均可由主会话一次 `ls` 得出，未开并行 Explore 子代理（按规模裁剪，维度未少）。
+
+## 切片顺序（每片：先写测试看红 → 实现 → 绿 → 更新 1-requirement.md 状态）
+
+| 切片 | 内容 | 贯通的入口 |
+|---|---|---|
+| S1 | SQLite 封装、Schema、Database（ingest/touch/pin/delete/clear/page）、BlobStore、CaptureDecision、ContentHasher | `--import <file>`、`--search` 雏形 |
+| S2 | QueryPlanner、ReadStore 搜索、RankFusion、SearchService（文本） | `--search` |
+| S3 | 任务队列：认领/租约/退避/失败、IndexWorker（替身 provider） | `--run-jobs` |
+| S4 | VectorCodec、FlatVectorIndex、CLIPTokenizer、ModelManifest、HardwareRecommendation | `--model list/recommend` |
+| S5 | 平台适配：Pasteboard 读写 + Watcher、VisionOCR、CoreMLCLIPProvider、AppleTranslator、ModelInstaller、PermissionProbe | App 启动、`--model install/activate` |
+| S6 | Diagnostics、Maintenance（verify/gc/reindex/purge-inactive）、Log、bench、export-logs | `--diagnose` 等 |
+| S7 | App：状态栏、面板、设置（快捷键录制、排除 App、模型管理、诊断、清空） | 菜单栏 / 热键 |
+| S8 | `scripts/build-app.sh`：干净目录构建、Info.plist、ad-hoc 签名、版本单一来源 | 7A |

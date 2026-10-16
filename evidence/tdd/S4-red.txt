@@ -1,0 +1,3 @@
+Tests/ClipCoreTests/SemanticTests.swift:152:22: [1;31merror: [1;39mcannot find 'SemanticEngine' in scope[0;0m
+Tests/ClipCoreTests/SemanticTests.swift:153:61: [1;31merror: [1;39mcannot find 'FlatVectorIndex' in scope[0;0m
+Tests/ClipCoreTests/SemanticTests.swift:154:61: [1;31merror: [1;39mcannot infer contextual base in reference to member 'textQueriesUnsupported'[0;0m

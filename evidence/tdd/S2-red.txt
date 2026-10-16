@@ -1,0 +1,5 @@
+    [0;36m|[0;0m                                                              `- [1;31merror: [1;39mcannot find type 'ReadStore' in scope[0;0m
+error: Build failed
+error: fatalError
+error: SwiftCompile normal arm64 failed with a nonzero exit code. Command line:     cd /Users/<user>/Program/app
+Tests/ClipCoreTests/SearchTests.swift:38:62: [1;31merror: [1;39mcannot find type 'ReadStore' in scope[0;0m

@@ -1,0 +1,60 @@
+active: mobileclip-blt@1; indexed 0/0, queued 0
+Big_Sur_Graphic.heic: stored(id: 1, isNew: true)
+Catalina_Coast.heic: stored(id: 2, isNew: true)
+Catalina_Sunset.heic: stored(id: 3, isNew: true)
+chat.png: stored(id: 4, isNew: true)
+code.png: stored(id: 5, isNew: true)
+Dome_Light.heic: stored(id: 6, isNew: true)
+Grid_Green.heic: stored(id: 7, isNew: true)
+invoice.png: stored(id: 8, isNew: true)
+Iridescence.heic: stored(id: 9, isNew: true)
+meeting.png: stored(id: 10, isNew: true)
+The_Beach.heic: stored(id: 11, isNew: true)
+The_Cliffs.heic: stored(id: 12, isNew: true)
+Tree.heic: stored(id: 13, isNew: true)
+Valley_Light.heic: stored(id: 14, isNew: true)
+completed=28 dropped=0 retried=0 failed=0 in 14.6s
+jobs now: pending=0 running=0 failed=0
+== mountain island in the sea
+# 1 hits in 1061.1ms; semantic: ready(translated: nil)
+2	image	[image 354×354]	[semantic sim=0.206]
+== sunset over the ocean
+# 0 hits in 65.2ms; semantic: ready(translated: nil)
+== desert sandstone rocks
+# 2 hits in 65.0ms; semantic: ready(translated: nil)
+14	image	[image 356×356]	[semantic sim=0.231]
+6	image	[image 356×356]	[semantic sim=0.205]
+== abstract colorful wallpaper
+# 2 hits in 64.8ms; semantic: ready(translated: nil)
+9	image	[image 214×130]	[semantic sim=0.234]
+1	image	[image 214×130]	[semantic sim=0.208]
+== illustration of a beach
+# 1 hits in 64.9ms; semantic: ready(translated: nil)
+11	image	[image 214×130]	[semantic sim=0.231]
+== screenshot of source code
+# 1 hits in 64.6ms; semantic: ready(translated: nil)
+5	image	[image 1000×456]	[semantic sim=0.224]
+== chat messages
+# 0 hits in 63.6ms; semantic: ready(translated: nil)
+== 发票号码
+# 2 hits in 69.1ms; semantic: ready(translated: nil) (CJK query not translated)
+8	image	[image 1000×344]	[ocr+semantic sim=0.258]
+4	image	[image 1000×288]	[semantic sim=0.219]
+== 火锅
+# 2 hits in 67.0ms; semantic: ready(translated: nil) (CJK query not translated)
+4	image	[image 1000×288]	[ocr+semantic sim=0.213]
+8	image	[image 1000×344]	[semantic sim=0.203]
+== 日落
+# 2 hits in 68.2ms; semantic: ready(translated: nil) (CJK query not translated)
+4	image	[image 1000×288]	[semantic sim=0.239]
+8	image	[image 1000×344]	[semantic sim=0.237]
+== [0.15] sunset over the ocean
+# 0 hits in 66.5ms; semantic: ready(translated: nil)
+== [0.15] chat messages
+# 0 hits in 65.0ms; semantic: ready(translated: nil)
+== [0.15] a red rock desert
+# 2 hits in 64.4ms; semantic: ready(translated: nil)
+14	image	[image 356×356]	[semantic sim=0.221]
+6	image	[image 356×356]	[semantic sim=0.211]
+== [0.15] a cat
+# 0 hits in 64.8ms; semantic: ready(translated: nil)

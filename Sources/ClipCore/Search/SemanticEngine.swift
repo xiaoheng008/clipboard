@@ -1,0 +1,70 @@
+import Foundation
+
+/// Why semantic search did or did not contribute (C10: one "no results" display, many causes).
+public enum SemanticStatus: Sendable, Equatable {
+    case notEnabled                       // no model activated
+    case textQueriesUnsupported           // active provider is image-only (e.g. Vision feature print)
+    case ready(translated: String?)       // translated = the English query actually embedded, if any
+    case failed(String)
+}
+
+public struct SemanticResult: Sendable, Equatable {
+    public var status: SemanticStatus
+    public var hits: [SemanticScore]
+    /// CJK query but no translator available: embedded as-is, quality likely poor (E18).
+    public var untranslatedCJK = false
+}
+
+public struct SemanticScore: Sendable, Equatable {
+    public let id: Int64
+    public let score: Float
+}
+
+/// Text → vector → nearest images, using whichever backend is active.
+public actor SemanticEngine {
+    private var provider: EmbeddingProvider?
+    private var index: VectorIndex?
+    private let translator: QueryTranslator
+    private var queryCache: [String: [Float]] = [:]
+    private var translationCache: [String: String] = [:]
+
+    public init(translator: QueryTranslator) { self.translator = translator }
+
+    public func activate(provider: EmbeddingProvider?, index: VectorIndex?) {
+        self.provider = provider
+        self.index = index
+        queryCache.removeAll()
+    }
+
+    public var activeModelID: String? { provider?.modelID }
+    public var activeIndex: VectorIndex? { index }
+
+    public func search(_ query: String, k: Int) async -> SemanticResult {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let provider, let index else { return SemanticResult(status: .notEnabled, hits: []) }
+        guard provider.capabilities.text else { return SemanticResult(status: .textQueriesUnsupported, hits: []) }
+        guard !q.isEmpty else { return SemanticResult(status: .ready(translated: nil), hits: []) }
+
+        var text = q
+        var translated: String?
+        var untranslated = false
+        if QueryPlanner.containsCJK(q) {
+            if let cached = translationCache[q] { translated = cached }
+            else if let en = await translator.toEnglish(q), !en.isEmpty { translated = en; translationCache[q] = en }
+            if let translated { text = translated } else { untranslated = true }
+        }
+        do {
+            let vec: [Float]
+            if let cached = queryCache[text] { vec = cached }
+            else {
+                vec = VectorCodec.normalized(try await provider.embed(text: text))
+                if queryCache.count > 128 { queryCache.removeAll() }
+                queryCache[text] = vec
+            }
+            let hits = await index.search(vec, k: k).map { SemanticScore(id: $0.id, score: $0.score) }
+            return SemanticResult(status: .ready(translated: translated), hits: hits, untranslatedCJK: untranslated)
+        } catch {
+            return SemanticResult(status: .failed(String(describing: error)), hits: [])
+        }
+    }
+}

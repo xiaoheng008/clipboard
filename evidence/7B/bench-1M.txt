@@ -1,0 +1,45 @@
+bench home: <tmpdir>/clipvault-bench-02D2A00C-BBD3-42CF-88AA-31062D4BCB0C
+  inserted 100000/1000000 (4s)
+  inserted 200000/1000000 (10s)
+  inserted 300000/1000000 (16s)
+  inserted 400000/1000000 (22s)
+  inserted 500000/1000000 (29s)
+  inserted 600000/1000000 (37s)
+  inserted 700000/1000000 (43s)
+  inserted 800000/1000000 (50s)
+  inserted 900000/1000000 (58s)
+  inserted 1000000/1000000 (66s)
+insert: 1000000 items in 66.4s (15054 items/s)
+database size: 825.3 MB
+page.first p50=0.0ms p95=0.1ms budget=50ms PASS rows=60
+search.fts 'clipboard' p50=184.9ms p95=185.8ms budget=50ms FAIL hits=200
+search.fts 'invoice report' p50=106.6ms p95=110.3ms budget=50ms FAIL hits=200
+search.fts '数据库' p50=0.2ms p95=0.6ms budget=50ms PASS hits=112
+search.fts '剪切板历史' p50=0.1ms p95=0.1ms budget=50ms PASS hits=0
+search.fts '#987654' p50=0.3ms p95=0.4ms budget=50ms PASS hits=1
+search.fts 'nonexistentterm' p50=0.0ms p95=0.1ms budget=50ms PASS hits=0
+search.like '发票' p50=6.7ms p95=7.7ms budget=150ms PASS hits=200
+search.like '图' p50=0.2ms p95=0.3ms budget=150ms PASS hits=200
+search.like 'zz' p50=356.6ms p95=360.8ms budget=150ms FAIL hits=0
+vector.load: 100000 × 512 in 13ms (≈98 MB fp16)
+vector.search k=100 p50=3.5ms p95=3.7ms budget=30ms PASS 
+SOME BUDGETS MISSED
+       76.25 real        58.45 user        12.79 sys
+           301236224  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+             1365038  page reclaims
+                   4  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+              302304  voluntary context switches
+                2339  involuntary context switches
+       1181342278897  instructions retired
+        287581452497  cycles elapsed
+           274187128  peak memory footprint
+exit=1

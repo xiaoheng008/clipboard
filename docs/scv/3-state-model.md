@@ -1,0 +1,92 @@
+# Phase 3 — 状态模型
+
+## 业务不变量
+
+| # | 不变量 | 保证层 | 检测 |
+|---|---|---|---|
+| I1 | `content_hash` 唯一：同内容只有一个条目 | UNIQUE 约束 | 约束本身 |
+| I2 | `kind='image'` ⇒ `blob_hash` 非空且文件存在 | 写入顺序（文件先于事务） | `--verify`、诊断 |
+| I3 | 每个条目恰有一行 FTS（rowid=id）；无孤儿 FTS 行 | 同事务 | 诊断（计数比对） |
+| I4 | 每个任务指向存在的条目；`(item,kind,model)` 唯一 | 外键级联 + UNIQUE | 约束本身 |
+| I5 | 内存向量索引的 id 集合 ⊆ 库内激活模型的向量 id 集合，且启动后相等 | 提交后再更新内存 | 诊断 |
+| I6 | 自写剪贴板（从历史复制）不产生新条目 | CaptureDecision | 单测 + 7B |
+| I7 | Concealed / Transient 内容永不落盘 | CaptureDecision 在任何 I/O 之前 | 单测 + 7B |
+
+## 4.1 业务状态机：条目（ClipItem）
+
+| 当前 | 事件 | 守卫 | 下一 | 副作用 | 失败恢复 |
+|---|---|---|---|---|---|
+| — | Captured(snapshot) | Decision = record，hash 不存在 | Stored | blob put → 事务 insert + FTS + jobs | 事务失败：条目不存在；blob 成孤儿（gc） |
+| — | Captured | hash 已存在 | Stored（touch） | 事务 update last_used/use_count | 失败：无变化 |
+| — | Captured | Decision = skip(原因) | — | 计数 skip 原因 | — |
+| Stored | CopyBack | 条目存在 | Stored（touch） | 写剪贴板（含自写标记）→ 事务 touch | 写剪贴板失败：提示，不 touch |
+| Stored | Pin / Unpin | — | Stored | 事务 update pinned | — |
+| Stored | Delete | — | Deleted | 事务删除 → blob 无引用则删文件 | 删文件失败：孤儿（gc） |
+| * | ClearAll | 用户二次确认 | Deleted | 事务删全部 → 删 blobs/ thumbs/ 内容 | 同上 |
+
+**「索引状态」是派生的，不是条目字段**（避免死状态 C7）：
+`ocr: 有 vision 任务 pending/running → 索引中；failed → 失败；无任务且 kind=image → 已完成`。
+`semantic(model): 有 embedding → 已索引；有 embed 任务 → 索引中/失败；都没有 → 未入队（激活后由回填入队）`。
+
+### 同一终态多成因（C10）
+
+| 终态 / 展示 | 成因 | 判据 | 展示差异 |
+|---|---|---|---|
+| 「未记录」 | 隐私类型 / 排除 App / 自写 / 空剪贴板 / 读取被拒 / 不支持的类型 / 写库失败 | `SkipReason` 枚举 | 诊断按原因计数；读取被拒 → 启动断言提示 |
+| 语义搜索「无结果」 | 无匹配 / 模型未安装 / 模型未激活 / 覆盖率 < 100% / 编码失败 / 翻译不可用 | `SemanticStatus` | 结果区下方状态条分别说明 |
+| 搜索「无结果」 | 无匹配 / 查询被规划为空 / 库错误 | `SearchOutcome` | 错误单独显示，不显示成「无结果」 |
+
+## 4.2 「同步」状态机：索引任务（本地 Outbox）
+
+| 状态 | 含义 | 进入条件 | 重启后怎么续 | 终态？ |
+|---|---|---|---|---|
+| （不存在） | 未入队 | — | 回填入队（激活模型时）/ `--reindex` | — |
+| pending | 等待执行 | 与条目同事务入队；失败可重试 | 原样 | 否 |
+| running | 某执行器持有租约 | 认领事务 | 租约过期后被重新认领（结果 UPSERT 幂等） | 否 |
+| （删除） | 完成 | 结果与删除同事务 | — | 是 |
+| failed | 超过重试 | attempts ≥ H3 | 原样保留，诊断可见；`--reindex --only/--all` 重置为 pending | 是（需人工） |
+
+## 4.3 UI 状态（面板）
+
+单一枚举，避免多个布尔组合出不可能状态：
+
+```swift
+enum PanelPhase { case browsing, searching(requestID), results(requestID), failed(message) }
+```
+
+| UI 状态 | 对应领域 | 持久化 | 重启时 | 过期响应 / 取消 / 重复 / 关闭 |
+|---|---|---|---|---|
+| query | — | 否 | 空 | 每次输入生成递增 requestID；响应 requestID ≠ 当前 → 丢弃 |
+| kindFilter | — | 否 | 全部 | 同上 |
+| items（当前页集合） | ReadStore 分页 | 否 | 重新加载 | 关闭面板后到达的结果丢弃；最多 H6 条 |
+| selection | — | 否 | 第一项 | 列表刷新后若 id 不在则选第一项 |
+| semanticStatus | 激活模型 / 覆盖率 | 否 | 重新计算 | — |
+| 新条目到达 | Stored 事件 | — | — | browsing 且无查询时插入顶部；搜索中只提示「有新内容」，不打乱结果 |
+
+## 4.4 持久化决策表
+
+| 状态 | 持久化 / 派生 / 重置 | 理由 |
+|---|---|---|
+| 条目、表示、blob | 持久化 | 唯一真相 |
+| OCR、标签、向量 | 持久化（派生） | 重算昂贵 |
+| FTS | 持久化（派生，同事务） | 搜索速度 |
+| 任务 | 持久化 | 被杀可续 |
+| 内存向量索引 | 重置（启动时从库加载） | 可重建 |
+| 缩略图 | 持久化缓存 | 可重建 |
+| 激活模型、快捷键、排除 App | 持久化 settings | 用户配置 |
+| 面板查询 / 选择 / 滚动 | 重置 | 临时交互 |
+| watcher 的 lastChangeCount | 重置（启动时读当前值，不补录启动前内容） | 无法得知启动前的变化历史 |
+| 跳过计数、心跳 | 内存（诊断用，进程级） | 无需跨重启 |
+
+## 状态 / key 两端（铁律 8）
+
+| 状态 / key | 写入方 | 读取方（渲染） |
+|---|---|---|
+| items.* | Database.ingest/touch/pin/delete/clear | PanelView 列表、预览、CLI `--search` |
+| items.ocr_text / labels | IndexWorker(vision) | FTS、预览面板「识别文字」 |
+| representations | Database.ingest | PasteboardWriter（回写） |
+| embeddings | IndexWorker(embed) | FlatVectorIndex 加载、诊断覆盖率 |
+| index_jobs | ingest / activate / reindex / worker | worker、诊断、设置页进度 |
+| settings.active_model | ModelController.activate | IndexWorker、SearchService、设置页 |
+| settings.hotkey | 设置页录制 | HotKeyCenter |
+| settings.excluded_apps | 设置页 | CaptureDecision |

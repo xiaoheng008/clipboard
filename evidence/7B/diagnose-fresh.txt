@@ -1,0 +1,19 @@
+[Diag] version                PASS  0.1.0 (build 1)
+[Diag] hardware               PASS  Apple M4, 32 GB, Version 27.0.1 (Build 26A434)
+[Diag] home                   PASS  <scratch>/home7b
+[Diag] sqlite                 PASS  3.54.0
+[Diag] schema                 PASS  v1 (expected v1)
+[Diag] integrity              PASS  ok
+[Diag] permission.pasteboard  PASS  alwaysAllow
+[Diag] watcher                SKIP  app not running in this process
+[Diag] capture.skips          PASS  none this session
+[Diag] storage                PASS  items=0 images=0 blobs=0.0 MB
+[Diag] invariant.blobs        PASS  missing blob files: 0
+[Diag] invariant.fts          PASS  fts rows 0 / items 0
+[Diag] jobs                   PASS  pending=0 running=0 failed=0
+[Diag] jobs.leases            PASS  expired running leases: 0
+[Diag] model.active           WARN  none → semantic image search disabled; recommended: mobileclip-blt@1
+[Diag] models.installed       PASS  none
+[Diag] translation.zh-en      WARN  supported (language pack not installed)
+[Diag] hotkey                 SKIP  app not running in this process
+[Diag] logs                   PASS  <scratch>/home7b/logs/clipvault.log

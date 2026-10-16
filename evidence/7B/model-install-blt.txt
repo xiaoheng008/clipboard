@@ -1,0 +1,16 @@
+downloading mobileclip-blt@1 (287 MB)…
+
+installed mobileclip-blt@1
+exit=0 seconds=56
+  mobileclip-s0@1	MobileCLIP S0（轻量）	104 MB	not installed	vectors=0
+  mobileclip-s2@1	MobileCLIP S2（均衡）	191 MB	not installed	vectors=0
+  mobileclip-blt@1	MobileCLIP B-LT（最佳）	287 MB	installed	vectors=0
+  vision-featureprint@1	Apple Vision 特征（以图搜图，无需下载）	built-in	installed	vectors=0
+total 2848
+drwxr-xr-x@ 7 <user>  wheel     224 10月 17 01:53 .
+drwxr-xr-x@ 3 <user>  wheel      96 10月 17 01:53 ..
+drwxr-xr-x@ 6 <user>  staff     192 10月 17 01:53 image.mlmodelc
+-rw-r--r--@ 1 <user>  wheel     161 10月 17 01:53 install.json
+-rw-------@ 1 <user>  staff  524657 10月 17 01:53 merges.txt
+drwxr-xr-x@ 6 <user>  staff     192 10月 17 01:53 text.mlmodelc
+-rw-------@ 1 <user>  staff  862328 10月 17 01:53 vocab.json
