@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var toast: NSPanel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        installMainMenu()
         setupStatusItem()
         Task { await start() }
     }
@@ -49,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             watcher = w
             // Startup assertion (iron law 14): denied access is visible, not silent.
             setAccessDenied(PasteboardAccess.current() == .denied)
-            if let combo = HotKeyCombo(setting: try? await rt.db.setting(SettingKey.hotkey)) {
+            if let combo = HotKeyCombo.resolve(setting: try? await rt.db.setting(SettingKey.hotkey)) {
                 if !HotKeyCenter.shared.register(combo, action: { [weak self] in self?.togglePanel() }) {
                     Log.shared.event("hotkey.register_failed", ["status": .int(Int64(HotKeyCenter.shared.lastError))])
                 }
@@ -62,6 +63,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             alert.runModal()
             NSApp.terminate(nil)
         }
+    }
+
+    /// A menu-bar-only app has no main menu, and without an Edit menu text fields never receive
+    /// ⌘A / ⌘C / ⌘V / ⌘X / ⌘Z (key equivalents are routed through NSApp.mainMenu). Not shown on screen.
+    private func installMainMenu() {
+        let main = NSMenu()
+        let appItem = NSMenuItem()
+        appItem.submenu = NSMenu()
+        appItem.submenu?.addItem(withTitle: "退出 ClipVault", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        main.addItem(appItem)
+        let editItem = NSMenuItem()
+        let edit = NSMenu(title: "编辑")
+        edit.addItem(withTitle: "撤销", action: Selector(("undo:")), keyEquivalent: "z")
+        let redo = edit.addItem(withTitle: "重做", action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        edit.addItem(.separator())
+        edit.addItem(withTitle: "剪切", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: "复制", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "粘贴", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editItem.submenu = edit
+        main.addItem(editItem)
+        NSApp.mainMenu = main
     }
 
     // MARK: Status item
@@ -184,7 +208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func probes() async -> PlatformProbes {
         let hk: String
         if let r = HotKeyCenter.shared.registered { hk = "\(r.display) registered" }
-        else if let rt, let s = try? await rt.db.setting(SettingKey.hotkey), HotKeyCombo(setting: s) != nil { hk = "failed to register (status \(HotKeyCenter.shared.lastError))" }
+        else if let rt, HotKeyCombo.resolve(setting: try? await rt.db.setting(SettingKey.hotkey)) != nil { hk = "failed to register (status \(HotKeyCenter.shared.lastError))" }
         else { hk = "unset (menu bar icon opens the panel)" }
         return PlatformProbes(pasteboardAccess: PasteboardAccess.current().rawValue,
                               translation: await AppleTranslator.availability(),

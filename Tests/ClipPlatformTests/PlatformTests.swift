@@ -119,3 +119,14 @@ struct MobileCLIPIntegrationTests {
         #expect(dot(vCode, tCode) > dot(vCode, tBeach))
     }
 }
+
+@Suite struct HotKeySettingTests {
+    // Q6 (revised 2026-10-17): default ⌥Space when never configured; an explicit clear stays empty.
+    @Test func defaultAndExplicitClear() {
+        #expect(HotKeyCombo.resolve(setting: nil) == HotKeyCombo.defaultCombo)
+        #expect(HotKeyCombo.defaultCombo.display == "⌥Space")
+        #expect(HotKeyCombo.resolve(setting: HotKeyCombo.clearedSetting) == nil)
+        #expect(HotKeyCombo.resolve(setting: "9:256") == HotKeyCombo(keyCode: 9, carbonModifiers: 256))
+        #expect(HotKeyCombo.resolve(setting: "garbage") == nil)
+    }
+}

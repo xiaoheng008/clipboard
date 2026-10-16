@@ -19,7 +19,7 @@ dist/ClipVault.app/Contents/MacOS/ClipVault --help   # 命令行：诊断、搜�
 - 历史不限条数（SQLite）；全文搜索支持中英文子串，100 万条 p95 < 10 ms（`evidence/7B/`）。
 - 图片：离线 OCR（中英）可搜图中文字；可选语义搜图（MobileCLIP S0 / S2 / B-LT，按内存推荐，设置 › 模型 下载后完全离线）。
 - 扩展：同签名的 Core ML CLIP 模型写进 `models/custom.json` 即可用；新后端实现 `EmbeddingProvider` / `VectorIndex` 协议。
-- 回车只复制到剪贴板（不需要辅助功能权限）；快捷键默认不设置，在设置页录制。
+- 回车只复制到剪贴板（不需要辅助功能权限）；唤起面板默认 ⌥空格，可在设置页重新录制或清除。
 
 ## 已知限制（本轮 A 方案未验证的部分）
 

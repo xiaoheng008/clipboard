@@ -18,6 +18,17 @@ public struct HotKeyCombo: Equatable, Sendable {
 
     public var setting: String { "\(keyCode):\(carbonModifiers)" }
 
+    /// Q6 (revised 2026-10-17 by the user): ⌥Space unless the user has set or cleared it.
+    public static let defaultCombo = HotKeyCombo(keyCode: UInt32(kVK_Space), carbonModifiers: UInt32(optionKey))
+    /// Stored when the user explicitly clears the hotkey, so the default does not come back.
+    public static let clearedSetting = "none"
+
+    /// Setting value → combo: absent = default; `clearedSetting` / unparsable = none.
+    public static func resolve(setting: String?) -> HotKeyCombo? {
+        guard let setting else { return defaultCombo }
+        return HotKeyCombo(setting: setting)
+    }
+
     /// From an NSEvent captured by the recorder. Requires at least one of ⌘ ⌥ ⌃ (a bare key would hijack typing).
     public init?(event: NSEvent) {
         let f = event.modifierFlags.intersection(.deviceIndependentFlagsMask)

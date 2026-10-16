@@ -38,7 +38,8 @@ final class SettingsModel {
     func installed(_ m: ModelManifest) -> Bool { ModelPaths.isInstalled(home: rt.home, model: m) }
 
     func reload() async {
-        if let h = HotKeyCombo(setting: try? await rt.db.setting(SettingKey.hotkey)) { hotkeyText = h.display } else { hotkeyText = "未设置" }
+        let stored = try? await rt.db.setting(SettingKey.hotkey)
+        if let h = HotKeyCombo.resolve(setting: stored) { hotkeyText = h.display + (stored == nil ? "（默认）" : "") } else { hotkeyText = "未设置" }
         excluded = await rt.service.excludedApps()
         if let c = try? await rt.service.counts() {
             stats = "\(c.items) 条历史（图片 \(c.images)） · 图片占用 \(ByteCountFormatter.string(fromByteCount: rt.blobs.totalBytes(), countStyle: .file))"
@@ -62,7 +63,7 @@ final class SettingsModel {
     func clearHotkey() {
         _ = onHotkeyChanged?(nil)
         hotkeyError = nil
-        Task { try? await rt.db.setSetting(SettingKey.hotkey, nil); await reload() }
+        Task { try? await rt.db.setSetting(SettingKey.hotkey, HotKeyCombo.clearedSetting); await reload() }
     }
 
     // MARK: Excluded apps
@@ -182,7 +183,7 @@ struct GeneralTab: View {
                     Button("清除") { model.clearHotkey() }.disabled(model.hotkeyText == "未设置")
                 }
                 if let e = model.hotkeyError { Text(e).foregroundStyle(.red).font(.caption) }
-                Text("未设置时，可点击菜单栏图标打开面板。").font(.caption).foregroundStyle(.secondary)
+                Text("默认 ⌥空格；清除后可点击菜单栏图标打开面板。").font(.caption).foregroundStyle(.secondary)
             }
             Section("不记录这些 App 的复制（Bundle ID）") {
                 ForEach(model.excluded, id: \.self) { id in
