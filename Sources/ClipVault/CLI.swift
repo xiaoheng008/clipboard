@@ -23,6 +23,7 @@ enum CLI {
       --model purge-inactive (--dry-run | --only <model-id> | --all)
       --bench [--items N] [--images N] [--dim N]   synthetic benchmark in a temporary home
       --login-item status | on | off     launch at login (off by default)
+      --slow-ops [--limit N]             slowest button / shortcut actions (1000 kept)
       --export-logs <dir>
       --version | --help
 
@@ -224,6 +225,12 @@ enum CLI {
             print(r.budgetsMet ? "ALL BUDGETS MET" : "SOME BUDGETS MISSED")
             return r.budgetsMet ? 0 : 1
 
+        case "--slow-ops":
+            _ = try check(rest, valued: ["--limit"])
+            let home = try AppHome.resolve()
+            print(try await TelemetryStore(home: home).report(limit: Int(try option(rest, "--limit") ?? "50") ?? 50))
+            return 0
+
         case "--login-item":
             let pos = try check(rest, positional: 1)
             switch pos.first ?? "status" {
@@ -238,8 +245,11 @@ enum CLI {
         case "--export-logs":
             let pos = try check(rest, positional: 1)
             guard let dir = pos.first else { throw CLIError.usage("--export-logs needs a directory") }
-            _ = try await openRuntime()
+            let rt = try await openRuntime()
             for u in try Log.shared.export(to: URL(fileURLWithPath: dir)) { print(u.path) }
+            let report = URL(fileURLWithPath: dir).appendingPathComponent("slow-ops.txt")
+            try await TelemetryStore(home: rt.home).report(limit: TelemetryStore.keep).write(to: report, atomically: true, encoding: .utf8)
+            print(report.path)
             return 0
 
         default:

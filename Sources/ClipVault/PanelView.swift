@@ -66,7 +66,7 @@ struct PanelView: View {
         .onAppear { searchFocused = true }
         .onKeyPress(.downArrow) { model.moveSelection(1); return .handled }
         .onKeyPress(.upArrow) { model.moveSelection(-1); return .handled }
-        .onKeyPress(.return) { model.copySelected(); return .handled }
+        .onKeyPress(.return) { model.copySelected(via: "enter"); return .handled }
         .onKeyPress(.escape) { model.onClose?(); return .handled }
     }
 
@@ -78,10 +78,12 @@ struct PanelView: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 16))
                     .focused($searchFocused)
-                    .onSubmit { model.copySelected() }
+                    .onSubmit { model.copySelected(via: "enter") }
                 if model.phase == .searching { ProgressView().controlSize(.small) }
-                Button { model.onOpenSettings?() } label: { Image(systemName: "gearshape") }
-                    .buttonStyle(.borderless)
+                TrackedButton(tracker: model.tracker, key: "panel.open_settings", name: "panel.open_settings", action: { model.onOpenSettings?() }) {
+                    Image(systemName: "gearshape")
+                }
+                .buttonStyle(.borderless)
                     .help("设置（快捷键、模型、排除的 App）")
             }
             HStack {
@@ -104,7 +106,8 @@ struct PanelView: View {
                 Text(note).font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
             }
             if model.newContentWhileSearching {
-                Button("有新内容，点击刷新") { model.refresh() }.buttonStyle(.link).font(.caption)
+                TrackedButton("有新内容，点击刷新", tracker: model.tracker, key: "panel.refresh", name: "panel.refresh") { model.refresh() }
+                    .buttonStyle(.link).font(.caption)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -125,10 +128,16 @@ struct PanelView: View {
                         .tag(row.id)
                         .onAppear { model.loadMoreIfNeeded(current: row) }
                         .contextMenu {
-                            Button("复制") { model.selection = row.id; model.copySelected() }
-                            Button(row.item.pinned ? "取消置顶" : "置顶") { model.selection = row.id; model.togglePinSelected() }
+                            TrackedButton("复制", tracker: model.tracker, key: "panel.menu.copy", name: "panel.menu.copy") {
+                                model.selection = row.id; model.copySelected(via: "menu")
+                            }
+                            TrackedButton(row.item.pinned ? "取消置顶" : "置顶", tracker: model.tracker, key: "panel.menu.pin", name: "panel.menu.pin") {
+                                model.selection = row.id; model.togglePinSelected(via: "menu")
+                            }
                             Divider()
-                            Button("删除", role: .destructive) { model.selection = row.id; model.deleteSelected() }
+                            TrackedButton("删除", tracker: model.tracker, key: "panel.menu.delete", name: "panel.menu.delete", role: .destructive) {
+                                model.selection = row.id; model.deleteSelected(via: "menu")
+                            }
                         }
                 }
             }
@@ -141,7 +150,7 @@ struct PanelView: View {
             .onChange(of: model.scrollRequest?.token) { _, _ in
                 if let id = model.scrollRequest?.id { withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(id, anchor: .center) } }
             }
-            .onTapGesture(count: 2) { model.copySelected() }
+            .onTapGesture(count: 2) { model.copySelected(via: "double_click") }
         }
     }
 
@@ -165,10 +174,13 @@ struct PanelView: View {
             if let hk = model.hotkeyDisplay {
                 Text("唤起：\(hk)").foregroundStyle(.secondary)
             } else {
-                Button("设置快捷键…") { model.onOpenSettings?() }.buttonStyle(.link)
+                TrackedButton("设置快捷键…", tracker: model.tracker, key: "panel.set_hotkey", name: "panel.set_hotkey") { model.onOpenSettings?() }
+                    .buttonStyle(.link)
             }
-            Button("删除") { model.deleteSelected() }.keyboardShortcut(.delete, modifiers: .command).hidden()
-            Button("置顶") { model.togglePinSelected() }.keyboardShortcut("p", modifiers: .command).hidden()
+            TrackedButton("删除", tracker: model.tracker, key: "panel.key.delete", name: "panel.key.delete") { model.deleteSelected(via: "shortcut") }
+                .keyboardShortcut(.delete, modifiers: .command).hidden()
+            TrackedButton("置顶", tracker: model.tracker, key: "panel.key.pin", name: "panel.key.pin") { model.togglePinSelected(via: "shortcut") }
+                .keyboardShortcut("p", modifiers: .command).hidden()
         }
         .font(.caption)
         .padding(.horizontal, 12).padding(.vertical, 6)
@@ -336,7 +348,9 @@ struct SimilarStrip: View {
                                 ThumbnailView(hash: h, url: model.service.blobURL(h), maxPixel: 160)
                                     .frame(width: 72, height: 72)
                                     .contentShape(Rectangle())
-                                    .onTapGesture { model.reveal(row.id) }
+                                    .onTapGesture {
+                                        model.tracker.perform(key: "panel.similar.reveal", name: "panel.similar.reveal", detail: String(row.id)) { model.reveal(row.id) }
+                                    }
                                     .help(row.similarity.map { String(format: "相似度 %.2f", $0) } ?? "")
                             }
                         }

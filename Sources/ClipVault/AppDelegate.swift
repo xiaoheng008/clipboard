@@ -12,6 +12,7 @@ final class HistoryPanel: NSPanel {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var rt: Runtime?
+    private var tracker: ActionTracker?
     private var watcher: ClipboardWatcher?
     private var statusItem: NSStatusItem?
     private var panel: HistoryPanel?
@@ -34,7 +35,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             ModelInstaller(home: home).cleanIncomplete()
             let rt = try await Runtime.open(home: home, services: .system(home: home))
             self.rt = rt
-            let model = PanelModel(service: rt.service, home: home)
+            // FR23: every button / shortcut action is timed; the 1000 slowest go to logs/telemetry.sqlite.
+            let tracker = ActionTracker(center: ActionCenter(telemetry: try? TelemetryStore(home: home)))
+            self.tracker = tracker
+            let model = PanelModel(service: rt.service, home: home, tracker: tracker)
             model.onClose = { [weak self] in self?.hidePanel() }
             model.onCopied = { [weak self] msg in self?.showToast(msg) }
             model.onOpenSettings = { [weak self] in self?.hidePanel(); self?.openSettings() }
@@ -52,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             // Startup assertion (iron law 14): denied access is visible, not silent.
             setAccessDenied(PasteboardAccess.current() == .denied)
             if let combo = HotKeyCombo.resolve(setting: try? await rt.db.setting(SettingKey.hotkey)) {
-                if !HotKeyCenter.shared.register(combo, action: { [weak self] in self?.togglePanel() }) {
+                if !HotKeyCenter.shared.register(combo, action: { [weak self] in self?.togglePanel(via: "hotkey") }) {
                     Log.shared.event("hotkey.register_failed", ["status": .int(Int64(HotKeyCenter.shared.lastError))])
                 }
             }
@@ -117,7 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             statusItem?.button?.performClick(nil)
             statusItem?.menu = nil
         } else {
-            togglePanel()
+            togglePanel(via: "status_icon")
         }
     }
 
@@ -132,7 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             m.addItem(.separator())
         }
         let hk = HotKeyCenter.shared.registered.map { "（\($0.display)）" } ?? ""
-        m.addItem(withTitle: "打开历史面板\(hk)", action: #selector(togglePanel), keyEquivalent: "").target = self
+        m.addItem(withTitle: "打开历史面板\(hk)", action: #selector(togglePanelFromMenu), keyEquivalent: "").target = self
         m.addItem(withTitle: "设置…", action: #selector(openSettings), keyEquivalent: ",").target = self
         m.addItem(.separator())
         m.addItem(withTitle: "退出 ClipVault", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -145,7 +149,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // MARK: Panel
 
-    @objc func togglePanel() {
+    @objc func togglePanelFromMenu() { togglePanel(via: "menu") }
+
+    func togglePanel(via source: String) {
+        guard let tracker else { return togglePanelNow() }
+        tracker.perform(key: "panel.toggle", name: "panel.toggle.\(source)") { [weak self] in self?.togglePanelNow() }
+    }
+
+    private func togglePanelNow() {
         if let panel, panel.isVisible { hidePanel() } else { showPanel() }
     }
 
@@ -192,9 +203,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func openSettings() {
         guard let rt else { return }
         if settingsWindow == nil {
-            let m = SettingsModel(rt: rt)
+            guard let tracker else { return }
+            let m = SettingsModel(rt: rt, tracker: tracker)
             m.onHotkeyChanged = { [weak self] combo in
-                let ok = HotKeyCenter.shared.register(combo, action: { self?.togglePanel() })
+                let ok = HotKeyCenter.shared.register(combo, action: { self?.togglePanel(via: "hotkey") })
                 self?.rebuildMenu()
                 return ok
             }

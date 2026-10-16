@@ -58,14 +58,24 @@ public struct SearchResponse: Sendable, Equatable {
     public var elapsedMs: Double
 }
 
+/// FR23 — model slot state machine (3.4 §2). previous keeps serving search while a new model loads.
+public enum ModelSlotState: Sendable, Equatable {
+    case inactive
+    case activating(target: String, previous: String?)
+    case active(String)
+    case failed(target: String, error: String, previous: String?)
+}
+
 public enum ServiceError: Error, CustomStringConvertible {
     case unknownModel(String), modelNotInstalled(String), unsupportedFamily(String), notFound(Int64)
+    case slotBusy(String)
     public var description: String {
         switch self {
         case .unknownModel(let m): "Unknown model \(m)"
         case .modelNotInstalled(let m): "Model \(m) is not installed (run --model install \(m))"
         case .unsupportedFamily(let f): "Unsupported model family \(f)"
         case .notFound(let id): "Item \(id) not found"
+        case .slotBusy(let m): "正在启用 \(m)，请稍候"
         }
     }
 }
@@ -109,6 +119,8 @@ public actor ClipService {
     private var active: [ModelSlot: ModelManifest] = [:]
     public private(set) var activationError: String?
     private var slotErrors: [ModelSlot: String] = [:]
+    private var slotStates: [ModelSlot: ModelSlotState] = [:]
+    public func slotState(_ slot: ModelSlot) -> ModelSlotState { slotStates[slot] ?? .inactive }
     /// Whether activation requires installed model files (false only in tests).
     var requireInstalledModels = true
     private var activeModel: ModelManifest? { active[.image] }
@@ -324,16 +336,35 @@ public actor ClipService {
         guard m.isSupportedFamily else { throw ServiceError.unsupportedFamily(m.family) }
         if requireInstalled && !ModelPaths.isInstalled(home: db.home, model: m) { throw ServiceError.modelNotInstalled(id) }
         let slot = m.slot
-        let provider = try await services.makeProvider(m)
-        let index: VectorIndex = slot == .text
-            ? Int8VectorIndex(modelID: m.id, dimension: provider.dimension)       // Q11
-            : FlatVectorIndex(modelID: m.id, dimension: provider.dimension)
-        let loaded = try await db.loadEmbeddings(modelID: m.id, dim: provider.dimension)
-        await index.replaceAll(loaded.entries)
+        // 3.4 §2: one activation per slot; the previous model keeps serving until the new one is loaded.
+        if case .activating(let target, _) = slotState(slot) { throw ServiceError.slotBusy(target) }
+        let previous = active[slot]?.id
+        slotStates[slot] = .activating(target: m.id, previous: previous)
+        emit(.modelChanged(previous))
+        let provider: EmbeddingProvider
+        let index: VectorIndex
+        let loaded: (entries: [(id: Int64, vector: [Float16])], skippedWrongDim: Int)
+        do {
+            provider = try await services.makeProvider(m)
+            index = slot == .text
+                ? Int8VectorIndex(modelID: m.id, dimension: provider.dimension)       // Q11
+                : FlatVectorIndex(modelID: m.id, dimension: provider.dimension)
+            loaded = try await db.loadEmbeddings(modelID: m.id, dim: provider.dimension)
+            await index.replaceAll(loaded.entries)
+            // Persist first: if this fails nothing has been switched; if the process dies right after,
+            // restart loads the new model from settings — either way memory and settings agree.
+            try await db.setSetting(Self.settingKey(slot), m.id)
+        } catch {
+            slotStates[slot] = .failed(target: m.id, error: String(describing: error), previous: previous)
+            emit(.modelChanged(previous))
+            throw error
+        }
+        // Swap. The slot stays .activating until everything below is done, so no other activation can
+        // interleave across these awaits (3.4 §2).
         await engine(slot).activate(provider: provider, index: index, translate: !m.isMultilingual)
         await worker.setEmbedding(slot: slot, provider, index: index)
-        try await db.setSetting(Self.settingKey(slot), m.id)
         active[slot] = m
+        slotStates[slot] = .active(m.id)
         slotErrors[slot] = nil
         activationError = slotErrors.isEmpty ? nil : slotErrors.values.sorted().joined(separator: "; ")
         let queued = try await db.enqueueMissingEmbeddings(modelID: m.id, kinds: Self.kinds(for: slot))
@@ -344,6 +375,8 @@ public actor ClipService {
     }
 
     public func deactivateModel(slot: ModelSlot = .image) async throws {
+        if case .activating(let target, _) = slotState(slot) { throw ServiceError.slotBusy(target) }
+        slotStates[slot] = .inactive
         await engine(slot).activate(provider: nil, index: nil)
         await worker.setEmbedding(slot: slot, nil, index: nil)
         try await db.setSetting(Self.settingKey(slot), nil)

@@ -96,9 +96,17 @@ final class PanelModel {
     /// Display string of the registered hotkey; nil = none set (Q6 default).
     var hotkeyDisplay: String?
 
-    init(service: ClipService, home: AppHome) {
+    let tracker: ActionTracker
+
+    init(service: ClipService, home: AppHome, tracker: ActionTracker) {
         self.service = service
         self.home = home
+        self.tracker = tracker
+    }
+
+    /// Failure / timeout text of the panel's own actions (FR23), shown in the footer.
+    var notice: String? {
+        ["panel.copy", "panel.delete", "panel.pin"].lazy.compactMap { self.tracker.message($0) }.first
     }
 
     var selectedRow: Row? { rows.first { $0.id == selection } ?? rows.first }
@@ -217,53 +225,48 @@ final class PanelModel {
 
     /// FR22: open Finder at the files' folder with the files selected, then close the panel.
     func revealInFinder(_ urls: [URL]) {
-        NSWorkspace.shared.activateFileViewerSelecting(urls)
-        onClose?()
+        tracker.perform(key: "panel.reveal_file", name: "panel.reveal_file") { [self] in
+            NSWorkspace.shared.activateFileViewerSelecting(urls)
+            onClose?()
+        }
     }
 
     /// FR21: open a link from the detail pane in the default browser, then close the panel.
     func openLink(_ url: URL) {
-        NSWorkspace.shared.open(url)
-        onClose?()
-    }
-
-    func copySelected() {
-        guard let row = selectedRow else { return }
-        Task {
-            do {
-                try await service.copyBack(id: row.id)
-                onCopied?(row.item.kind == .image ? "已复制图片" : "已复制")
-                onClose?()
-            } catch { phase = .failed("复制失败：\(error)") }
+        tracker.perform(key: "panel.open_link", name: "panel.open_link", detail: url.scheme) { [self] in
+            NSWorkspace.shared.open(url)
+            onClose?()
         }
     }
 
-    func deleteSelected() {
+    // All panel actions (button, menu, keyboard, double-click) go through the action state machine (FR23).
+
+    func copySelected(via source: String = "button") {
+        guard let row = selectedRow else { return }
+        tracker.perform(key: "panel.copy", name: "panel.copy.\(source)", detail: String(row.id)) { [self] in
+            try await service.copyBack(id: row.id)
+            onCopied?(row.item.kind == .image ? "已复制图片" : "已复制")
+            onClose?()
+        }
+    }
+
+    func deleteSelected(via source: String = "button") {
         guard let row = selectedRow else { return }
         let idx = rows.firstIndex { $0.id == row.id } ?? 0
-        Task {
-            do {
-                try await service.delete(id: row.id)
-            } catch {
-                notice = "删除失败，条目已保留：\(error)"      // R7: never show a failed delete as done
-                return
-            }
+        tracker.perform(key: "panel.delete", name: "panel.delete.\(source)", detail: String(row.id)) { [self] in
+            try await service.delete(id: row.id)       // R7: on failure the row stays and the reason is shown
             rows.removeAll { $0.id == row.id }
             selection = rows.isEmpty ? nil : rows[min(idx, rows.count - 1)].id
         }
     }
 
-    func togglePinSelected() {
+    func togglePinSelected(via source: String = "button") {
         guard let row = selectedRow else { return }
-        Task {
-            do { try await service.setPinned(id: row.id, !row.item.pinned) }
-            catch { notice = "置顶失败：\(error)"; return }
+        tracker.perform(key: "panel.pin", name: "panel.pin.\(source)", detail: String(row.id)) { [self] in
+            try await service.setPinned(id: row.id, !row.item.pinned)
             if phase == .browsing { await mergeFirstPage() } else { refresh() }
         }
     }
-
-    /// Transient message for failed actions (R7).
-    var notice: String?
 
     /// From ClipService change events (R9): only new captures and clear-all change the list from outside;
     /// the panel's own delete / pin update it locally.

@@ -174,3 +174,28 @@ import Testing
         #expect(norm(documented) == norm(Schema.v1))
     }
 }
+
+@Suite struct TrackedUITests {
+    // AC23.5 — every Button in the app UI goes through TrackedButton (timed, state machine, telemetry).
+    @Test func appButtonsAreTracked() {
+        let files = swiftSources(under: "Sources/ClipVault")
+        #expect(files.count >= 6)
+        var offenders: [String] = []
+        for f in files where !f.path.hasSuffix("TrackedButton.swift") {
+            for line in f.text.split(separator: "\n") {
+                let l = line.replacingOccurrences(of: "TrackedButton(", with: "").replacingOccurrences(of: "NSStatusBarButton", with: "")
+                if l.contains("Button(") && !l.trimmingCharacters(in: .whitespaces).hasPrefix("//") { offenders.append("\(f.path): \(line.trimmingCharacters(in: .whitespaces))") }
+            }
+        }
+        #expect(offenders == [])
+    }
+
+    // Contract: the telemetry DDL in docs/scv/2.2 is verbatim TelemetryStore.ddl.
+    @Test func telemetryDocMatchesCode() throws {
+        let doc = try String(contentsOf: repoRoot.appendingPathComponent("docs/scv/2.2-data-contracts.md"), encoding: .utf8)
+        let begin = try #require(doc.range(of: "<!-- schema:telemetry:begin -->\n```sql\n"))
+        let end = try #require(doc.range(of: "\n```\n<!-- schema:telemetry:end -->"))
+        func norm(_ s: String) -> String { s.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: "\n") }
+        #expect(norm(String(doc[begin.upperBound..<end.lowerBound])) == norm(TelemetryStore.ddl))
+    }
+}

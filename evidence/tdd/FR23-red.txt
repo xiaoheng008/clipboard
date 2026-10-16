@@ -1,0 +1,5 @@
+Tests/ClipCoreTests/ActionTests.swift:17:106: [1;31merror: [1;39mreference to member 'cancelled' cannot be resolved without a contextual t
+Tests/ClipCoreTests/ActionTests.swift:17:23: [1;31merror: [1;39mcannot find 'ActionState' in scope[0;0m
+Tests/ClipCoreTests/ActionTests.swift:17:54: [1;31merror: [1;39mtype 'Any' has no member 'failed'[0;0m
+Tests/ClipCoreTests/ActionTests.swift:17:68: [1;31merror: [1;39mtype 'Any' has no member 'timedOut'[0;0m
+Tests/ClipCoreTests/ActionTests.swift:18:43: [1;31merror: [1;39mcannot find type 'ActionState' in scope[0;0m
