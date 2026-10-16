@@ -135,3 +135,29 @@ import Testing
         #expect(offenders.map(\.path) == [])
     }
 }
+
+@Suite struct PrivacyRemanenceTests {
+    func rawBytes(_ home: AppHome) throws -> Data {
+        var d = Data()
+        for suffix in ["", "-wal"] {
+            let u = URL(fileURLWithPath: home.databaseURL.path + suffix)
+            if FileManager.default.fileExists(atPath: u.path) { d.append(try Data(contentsOf: u)) }
+        }
+        return d
+    }
+
+    // R14 — after delete / clear-all the text is no longer recoverable from the database files.
+    @Test(arguments: [false, true])
+    func deletedTextIsNotInDatabaseFiles(clearAll: Bool) async throws {
+        let home = try makeTempHome()
+        let db = try Database(home: home)
+        let secret = "SECRET-token-9f8e7d6c5b4a-密码口令"
+        let r = try await db.ingest(CaptureDecision.classify(textSnapshot(secret)).draft!, blobHash: nil, source: nil, jobs: [])
+        _ = try await db.ingest(CaptureDecision.classify(textSnapshot("keep me")).draft!, blobHash: nil, source: nil, jobs: [])
+        #expect(try rawBytes(home).range(of: Data(secret.utf8)) != nil)      // sanity: it was on disk
+        if clearAll { _ = try await db.clearAll() } else { _ = try await db.delete(id: r.id) }
+        let raw = try rawBytes(home)
+        #expect(raw.range(of: Data(secret.utf8)) == nil)
+        #expect(raw.range(of: Data("9f8e7d6c5b4a".utf8)) == nil)
+    }
+}

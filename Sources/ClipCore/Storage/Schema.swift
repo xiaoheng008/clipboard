@@ -83,7 +83,8 @@ public enum Schema {
         if !readOnly {
             try c.exec("PRAGMA journal_mode=WAL")
         }
-        try c.exec("PRAGMA foreign_keys=ON; PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY")
+        // secure_delete: freed pages are zeroed, so deleted clipboard content is not left in the file (R14).
+        try c.exec("PRAGMA foreign_keys=ON; PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY; PRAGMA secure_delete=ON")
     }
 
     static func version(_ c: SQLiteConnection) throws -> Int {
@@ -105,5 +106,17 @@ public enum Schema {
             if found < 1 { try c.exec(v1) }
             try c.exec("PRAGMA user_version = \(currentVersion)")
         }
+    }
+
+    /// FTS5 "secure-delete": deletes remove postings physically instead of leaving tombstones (R14).
+    /// Persistent table config; idempotent, also applied to databases created before this existed.
+    static func applyPrivacySettings(_ c: SQLiteConnection) throws {
+        try c.exec("INSERT INTO items_fts(items_fts, rank) VALUES('secure-delete', 1)")
+        try c.exec("INSERT INTO items_ngram(items_ngram, rank) VALUES('secure-delete', 1)")
+    }
+
+    /// After deleting content: move WAL pages into the (zeroed) main file and truncate the WAL (R14).
+    static func scrubWAL(_ c: SQLiteConnection) {
+        try? c.exec("PRAGMA wal_checkpoint(TRUNCATE)")
     }
 }

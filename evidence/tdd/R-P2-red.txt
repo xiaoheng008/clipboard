@@ -1,0 +1,5 @@
+✘ Test deletedTextIsNotInDatabaseFiles(clearAll:) recorded an issue with 1 argument clearAll → true at DatabaseTests.swift:160:9: Expectation failed: raw.range(of: Data(secret.utf8)) == nil
+✘ Test deletedTextIsNotInDatabaseFiles(clearAll:) recorded an issue with 1 argument clearAll → false at DatabaseTests.swift:160:9: Expectation failed: raw.range(of: Data(secret.utf8)) == nil
+✘ Test deletedTextIsNotInDatabaseFiles(clearAll:) recorded an issue with 1 argument clearAll → true at DatabaseTests.swift:161:9: Expectation failed: raw.range(of: Data("9f8e7d6c5b4a".utf8)) == nil
+✘ Test deletedTextIsNotInDatabaseFiles(clearAll:) recorded an issue with 1 argument clearAll → false at DatabaseTests.swift:161:9: Expectation failed: raw.range(of: Data("9f8e7d6c5b4a".utf8)) == nil
+✘ Test deletedTextIsNotInDatabaseFiles(clearAll:) with 2 test cases failed after 0.011 seconds with 4 issues.

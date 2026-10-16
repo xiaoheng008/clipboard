@@ -49,7 +49,13 @@ public final class ClipboardWatcher {
             defer { Task { @MainActor in self.inFlight = false } }
             let pre = await service.preflight(types: types, changeCount: cc, frontmost: front)
             guard pre == .read else { return }
-            let snapshot = await MainActor.run { PasteboardReader.snapshot() }
+            // R15 / I7: read only if the pasteboard still holds the change that was judged. Otherwise the
+            // types / frontmost app / exclusion decision belong to older content; the next poll handles it.
+            guard let snapshot = await MainActor.run(body: { PasteboardReader.changeCount == cc ? PasteboardReader.snapshot() : nil }),
+                  snapshot.changeCount == cc else {
+                Log.shared.event("capture.superseded", ["change": .int(Int64(cc))])
+                return
+            }
             if snapshot.types.isEmpty && !types.isEmpty {
                 // Types were visible but content was not: access was refused at read time (A1).
                 await service.recordSkip(.accessDenied)

@@ -134,6 +134,7 @@ public actor Database {
         conn = try SQLiteConnection(path: home.databaseURL.path)
         try Schema.configure(conn, readOnly: false)
         try Schema.migrate(conn, databaseURL: home.databaseURL)
+        try Schema.applyPrivacySettings(conn)
     }
 
     func setFaultInjection(_ f: DatabaseFault?) { fault = f }
@@ -221,7 +222,8 @@ public actor Database {
     /// Deletes the item (cascades representations/jobs/embeddings) and its FTS row.
     /// Returns blob hashes no longer referenced; the caller deletes those files after commit.
     public func delete(id: Int64) throws -> [String] {
-        try conn.transaction {
+        defer { Schema.scrubWAL(conn) }
+        return try conn.transaction {
             guard let (seq, blob) = try conn.query("SELECT seq, blob_hash FROM items WHERE id = ?", [id], { ($0.int(0), $0.text(1)) }).first else { return [] }
             try deleteIndexes(seq: seq)
             try conn.run("DELETE FROM items WHERE id = ?", [id])
@@ -233,13 +235,18 @@ public actor Database {
 
     /// Q4: removes every item, pinned included. Returns all blob hashes that were referenced.
     public func clearAll() throws -> [String] {
-        try conn.transaction {
+        let blobs = try conn.transaction {
             let blobs = try conn.query("SELECT DISTINCT blob_hash FROM items WHERE blob_hash IS NOT NULL") { $0.text(0) ?? "" }
             try conn.run("DELETE FROM items_fts")
             try conn.run("DELETE FROM items_ngram")
             try conn.run("DELETE FROM items")
             return blobs
         }
+        // Everything is gone: rebuild the file so no freed page or FTS segment keeps old content (R14).
+        Schema.scrubWAL(conn)
+        try? conn.exec("VACUUM")
+        Schema.scrubWAL(conn)
+        return blobs
     }
 
     public func item(id: Int64) throws -> ItemDetail? {
