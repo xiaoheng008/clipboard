@@ -37,6 +37,11 @@ public struct DiagnosticReport: Sendable {
 
 /// Read-only, idempotent self-check shared by `--diagnose` and the settings page (iron law 24a).
 public enum Diagnostics {
+    /// R13 / E22: < 500 MB free is a failure (captures will start failing), < 5 GB a warning.
+    public static func diskStatus(freeBytes: Int64) -> CheckStatus {
+        freeBytes < 500 << 20 ? .fail : (freeBytes < 5 << 30 ? .warn : .pass)
+    }
+
     public static func run(_ rt: Runtime, probes: PlatformProbes) async -> DiagnosticReport {
         var out: [DiagnosticCheck] = []
         func add(_ n: String, _ s: CheckStatus, _ o: String) { out.append(DiagnosticCheck(name: n, status: s, observed: o)) }
@@ -65,8 +70,14 @@ public enum Diagnostics {
         } else {
             add("watcher", .skip, "app not running in this process")
         }
+        if let free = (try? rt.home.root.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?.volumeAvailableCapacityForImportantUsage {
+            add("disk.free", diskStatus(freeBytes: free), ByteCountFormatter.string(fromByteCount: free, countStyle: .file) + " available")
+        }
+        // Write failures from any process are in the shared log (skip counters are per process).
+        let recentWriteFailures = Log.shared.recentCount(of: "capture.write_failed", within: 24 * 3600)
+        add("capture.write_failures", recentWriteFailures > 0 ? .fail : .pass, "\(recentWriteFailures) in the last 24 h")
         let skips = await rt.service.skipCounts()
-        add("capture.skips", (skips[.writeFailed] ?? 0) > 0 ? .warn : .pass,
+        add("capture.skips", .pass,
             skips.isEmpty ? "none this session" : skips.sorted { $0.key.rawValue < $1.key.rawValue }.map { "\($0.key.rawValue)=\($0.value)" }.joined(separator: " "))
 
         do {

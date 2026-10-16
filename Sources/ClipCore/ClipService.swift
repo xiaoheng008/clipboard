@@ -29,7 +29,9 @@ public enum IngestOutcome: Sendable, Equatable {
 }
 
 public enum ClipEvent: Sendable, Equatable {
-    case itemsChanged          // ingest / touch / pin / delete / clear
+    case captured(Int64)       // a copy was recorded (new or moved to the top) — R9
+    case cleared               // clear-all
+    case itemsChanged          // pin / delete / copy-back (the panel updates itself for its own actions)
     case indexProgress         // a job finished
     case modelChanged(String?)
 }
@@ -107,6 +109,9 @@ public actor ClipService {
     private var changeHandler: (@Sendable (ClipEvent) -> Void)?
     private var active: [ModelSlot: ModelManifest] = [:]
     public private(set) var activationError: String?
+    private var slotErrors: [ModelSlot: String] = [:]
+    /// Whether activation requires installed model files (false only in tests).
+    var requireInstalledModels = true
     private var activeModel: ModelManifest? { active[.image] }
 
     init(db: Database, reads: ReadStore, blobs: BlobStore, engine: SemanticEngine, textEngine: SemanticEngine, worker: IndexWorker,
@@ -173,7 +178,7 @@ public actor ClipService {
             if let blobHash { unmarkBlobPending(blobHash) }
             lastCaptureAt = Date()
             Log.shared.event("capture.stored", ["id": .int(r.id), "kind": .label(draft.kind.rawValue), "new": .bool(r.isNew), "bytes": .int(Int64(draft.byteSize))])
-            emit(.itemsChanged)
+            emit(.captured(r.id))
             if !jobs.isEmpty && r.isNew { await worker.wake() }
             return .stored(id: r.id, isNew: r.isNew)
         } catch {
@@ -218,7 +223,7 @@ public actor ClipService {
         if let idx = await engine.activeIndex { await idx.replaceAll([]) }
         if let idx = await textEngine.activeIndex { await idx.replaceAll([]) }
         Log.shared.event("items.cleared", ["blobs": .int(Int64(freed.count))])
-        emit(.itemsChanged)
+        emit(.cleared)
     }
 
     public func setExcludedApps(_ ids: [String]) async throws {
@@ -255,22 +260,28 @@ public actor ClipService {
         catch { searchError = String(describing: error) }
 
         // Two semantic routes: image slot (kind all/image) and text slot (kind all/text).
-        var status: SemanticStatus = .notEnabled
+        let applicable = ModelSlot.allCases.filter { slot in
+            slot == .image ? (req.kind == .all || req.kind == .image) : (req.kind == .all || req.kind == .text)
+        }
+        // R11: say why there is no semantic contribution.
+        var status: SemanticStatus
+        if applicable.contains(where: { active[$0] != nil }) { status = .ready(translated: nil) }
+        else if let err = applicable.compactMap({ slotErrors[$0] }).first { status = .unavailable(err) }
+        else if !active.isEmpty { status = .notApplicable }
+        else { status = .notEnabled }
         var untranslated = false
         var semanticHits: [SemanticHit] = []
+        var reported = false
         if req.semantic && !plan.terms.isEmpty {
-            for slot in ModelSlot.allCases {
-                let wanted = slot == .image ? (req.kind == .all || req.kind == .image) : (req.kind == .all || req.kind == .text)
-                guard wanted, let manifest = active[slot] else { continue }
+            for slot in applicable {
+                guard let manifest = active[slot] else { continue }
                 let r = await engine(slot).search(req.text, k: max(req.limit, 50))
-                if slot == .image || status == .notEnabled { status = r.status; untranslated = r.untranslatedCJK }
+                if !reported || slot == .image { status = r.status; untranslated = r.untranslatedCJK; reported = true }
                 let kept = req.rawSemantic ? r.hits : SemanticFilter.apply(r.hits, floor: manifest.floor, margin: manifest.margin)
                 if !kept.isEmpty, let summaries = try? await reads.summaries(ids: kept.map(\.id)) {
                     semanticHits += kept.compactMap { s in summaries[s.id].map { SemanticHit(item: $0, score: s.score) } }
                 }
             }
-        } else if !active.isEmpty {
-            status = .ready(translated: nil)
         }
         // Each route is already judged relative to its own scale; order across routes by RRF rank.
         semanticHits.sort { $0.score > $1.score }
@@ -319,11 +330,12 @@ public actor ClipService {
             : FlatVectorIndex(modelID: m.id, dimension: provider.dimension)
         let loaded = try await db.loadEmbeddings(modelID: m.id, dim: provider.dimension)
         await index.replaceAll(loaded.entries)
-        await engine(slot).activate(provider: provider, index: index)
+        await engine(slot).activate(provider: provider, index: index, translate: !m.isMultilingual)
         await worker.setEmbedding(slot: slot, provider, index: index)
         try await db.setSetting(Self.settingKey(slot), m.id)
         active[slot] = m
-        activationError = nil
+        slotErrors[slot] = nil
+        activationError = slotErrors.isEmpty ? nil : slotErrors.values.sorted().joined(separator: "; ")
         let queued = try await db.enqueueMissingEmbeddings(modelID: m.id, kinds: Self.kinds(for: slot))
         Log.shared.event("model.activated", ["model": .label(m.id), "slot": .label(slot.rawValue), "vectors": .int(Int64(loaded.entries.count)),
                                              "skipped_dim": .int(Int64(loaded.skippedWrongDim)), "queued": .int(Int64(queued))])
@@ -336,20 +348,41 @@ public actor ClipService {
         await worker.setEmbedding(slot: slot, nil, index: nil)
         try await db.setSetting(Self.settingKey(slot), nil)
         active[slot] = nil
+        slotErrors[slot] = nil
+        activationError = slotErrors.isEmpty ? nil : slotErrors.values.sorted().joined(separator: "; ")
         emit(.modelChanged(nil))
     }
 
     func restoreActiveModels(requireInstalled: Bool) async {
-        var errors: [String] = []
+        requireInstalledModels = requireInstalled
         for slot in ModelSlot.allCases {
             guard let id = try? await db.setting(Self.settingKey(slot)) else { continue }
             do { try await activateModel(id: id, requireInstalled: requireInstalled) }
             catch {
-                errors.append("\(slot.rawValue): \(error)")
+                slotErrors[slot] = "\(slot.rawValue): \(error)"
                 Log.shared.event("model.restore_failed", ["model": .label(id), "error": .error(error)])
             }
         }
-        activationError = errors.isEmpty ? nil : errors.joined(separator: "; ")
+        activationError = slotErrors.isEmpty ? nil : slotErrors.values.sorted().joined(separator: "; ")
+    }
+
+    /// R8: another process (the CLI) may have changed the active models or written vectors.
+    /// Called periodically by the app; cheap when nothing changed.
+    public func syncWithStore() async {
+        for slot in ModelSlot.allCases {
+            let stored = try? await db.setting(Self.settingKey(slot))
+            if stored != active[slot]?.id {
+                if let id = stored { try? await activateModel(id: id, requireInstalled: requireInstalledModels) }
+                else { try? await deactivateModel(slot: slot) }
+                continue
+            }
+            guard let m = active[slot], let index = await engine(slot).activeIndex else { continue }
+            let storedCount = (try? await db.semanticCoverage(modelID: m.id, kinds: Self.kinds(for: slot)).indexed) ?? 0
+            if storedCount != (await index.count()), let loaded = try? await db.loadEmbeddings(modelID: m.id, dim: index.dimension) {
+                await index.replaceAll(loaded.entries)
+                Log.shared.event("model.index_reloaded", ["model": .label(m.id), "vectors": .int(Int64(loaded.entries.count))])
+            }
+        }
     }
 
     public func recommendedModel(slot: ModelSlot = .image) -> ModelManifest? { catalog.recommended(memoryGB: services.memoryGB(), slot: slot) }

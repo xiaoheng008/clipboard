@@ -75,7 +75,7 @@ actor FakeIndex: VectorIndex {
         for attempt in 1...3 {
             let jobs = try await db.claimJobs(limit: 10, activeModel: nil, leaseMs: 1000)
             #expect(jobs.count == 1, "attempt \(attempt)")
-            try await db.failJob(id: jobs[0].id, error: "boom", maxAttempts: 3)
+            try await db.failJob(job: jobs[0], error: "boom", maxAttempts: 3)
             // Not claimable until backoff elapses.
             #expect(try await db.claimJobs(limit: 10, activeModel: nil, leaseMs: 1000).isEmpty)
             clock.advance(ms: 1000 << attempt + 1)
@@ -140,5 +140,32 @@ actor FakeIndex: VectorIndex {
         let r2 = await worker.drain()
         #expect(r2.completed == 1)
         #expect(ocr.calls.value == 2)
+    }
+}
+
+@Suite struct LeaseOwnershipTests {
+    // R12 — after another claimant takes over an expired lease, the old claimant's completion / failure
+    // is ignored (no double attempts, no state flip), and the new claimant completes the job.
+    @Test func staleClaimantCannotCompleteOrFail() async throws {
+        let clock = TestClock()
+        let db = try Database(home: try makeTempHome(), clock: clock.fn)
+        _ = try await JobQueueTests().imageItem(db, seed: 4)
+        let first = try await db.claimJobs(limit: 1, activeModels: [], leaseMs: 1000)
+        clock.advance(ms: 1001)
+        let second = try await db.claimJobs(limit: 1, activeModels: [], leaseMs: 1000)
+        #expect(first.map(\.id) == second.map(\.id))
+        try await db.failJob(job: first[0], error: "late", maxAttempts: 3)
+        #expect(try await db.counts().jobsRunning == 1)                         // still owned by the second claimant
+        #expect(try await db.completeVision(job: first[0], result: OCRResult(text: "old", labels: [])) == false)
+        #expect(try await db.completeVision(job: second[0], result: OCRResult(text: "new", labels: [])) == true)
+        #expect(try await db.counts().jobsRunning == 0)
+    }
+}
+
+@Suite struct DiskSpaceTests {
+    // R13 — thresholds for the disk check.
+    @Test(arguments: [(Int64(200) << 20, CheckStatus.fail), (Int64(2) << 30, CheckStatus.warn), (Int64(50) << 30, CheckStatus.pass)])
+    func classify(free: Int64, expected: CheckStatus) {
+        #expect(Diagnostics.diskStatus(freeBytes: free) == expected)
     }
 }

@@ -77,21 +77,28 @@ public final class HotKeyCenter {
     fileprivate var action: (() -> Void)?
     public private(set) var registered: HotKeyCombo?
     public private(set) var lastError: OSStatus = noErr
+    /// The combination that could not be registered last time (shown in Settings, R6).
+    public private(set) var failed: HotKeyCombo?
+    private var nextID: UInt32 = 1
 
-    /// Returns false if registration failed (E26: combination taken by the system or another app).
+    /// Registers the new combination *before* releasing the old one, so a failure keeps the old hotkey
+    /// working (E26 / R6). Returns false if the combination is taken by the system or another app.
     @discardableResult
     public func register(_ combo: HotKeyCombo?, action: @escaping () -> Void) -> Bool {
-        unregister()
         self.action = action
-        guard let combo else { return true }
+        guard let combo else { unregister(); failed = nil; return true }
+        if combo == registered { failed = nil; return true }
         installHandler()
         var hotKeyRef: EventHotKeyRef?
-        let id = EventHotKeyID(signature: OSType(0x434C5056), id: 1)   // 'CLPV'
+        let id = EventHotKeyID(signature: OSType(0x434C5056), id: nextID)   // 'CLPV'
+        nextID += 1
         let status = RegisterEventHotKey(combo.keyCode, combo.carbonModifiers, id, GetApplicationEventTarget(), 0, &hotKeyRef)
         lastError = status
-        guard status == noErr, let hotKeyRef else { return false }
+        guard status == noErr, let hotKeyRef else { failed = combo; return false }
+        if let ref { UnregisterEventHotKey(ref) }
         ref = hotKeyRef
         registered = combo
+        failed = nil
         return true
     }
 

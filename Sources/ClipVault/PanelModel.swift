@@ -154,12 +154,13 @@ final class PanelModel {
         let id = gate.next()
         phase = .searching
         let r = await service.search(SearchRequest(requestID: id, text: text, kind: kind, semantic: true, limit: 200))
+        let note = await describe(r)                         // R10: finish all awaits before the stale check
         guard gate.accepts(r.requestID) else { return }     // stale response (AC6.4)
         rows = r.hits.map { Row(item: $0.item, sources: $0.sources, similarity: $0.similarity) }
         lastElapsedMs = r.elapsedMs
         newContentWhileSearching = false
         if let e = r.error { phase = .failed(e) } else { phase = .results }
-        semanticNote = await describe(r)
+        semanticNote = note
         fixSelection()
     }
 
@@ -168,6 +169,8 @@ final class PanelModel {
         case .notEnabled: return "语义搜图未启用 · 在设置 › 模型中下载并启用"
         case .textQueriesUnsupported: return "当前模型只支持以图搜图"
         case .failed(let e): return "语义搜索出错：\(e)"
+        case .unavailable(let e): return "语义搜索不可用（模型加载失败）：\(e) · 可在设置 › 模型中重新下载"
+        case .notApplicable: return nil
         case .ready(let translated):
             var parts: [String] = []
             if let m = await service.activeModelManifest(), let cov = try? await service.coverage(modelID: m.id), cov.images > cov.indexed {
@@ -209,7 +212,12 @@ final class PanelModel {
         guard let row = selectedRow else { return }
         let idx = rows.firstIndex { $0.id == row.id } ?? 0
         Task {
-            try? await service.delete(id: row.id)
+            do {
+                try await service.delete(id: row.id)
+            } catch {
+                notice = "删除失败，条目已保留：\(error)"      // R7: never show a failed delete as done
+                return
+            }
             rows.removeAll { $0.id == row.id }
             selection = rows.isEmpty ? nil : rows[min(idx, rows.count - 1)].id
         }
@@ -218,18 +226,39 @@ final class PanelModel {
     func togglePinSelected() {
         guard let row = selectedRow else { return }
         Task {
-            try? await service.setPinned(id: row.id, !row.item.pinned)
-            refresh()
+            do { try await service.setPinned(id: row.id, !row.item.pinned) }
+            catch { notice = "置顶失败：\(error)"; return }
+            if phase == .browsing { await mergeFirstPage() } else { refresh() }
         }
     }
 
-    /// From ClipService change events.
-    func storeChanged() {
-        switch phase {
-        case .browsing: loadFirstPage()
-        case .results, .searching: newContentWhileSearching = true   // don't reshuffle results (E24)
-        case .failed: refresh()
+    /// Transient message for failed actions (R7).
+    var notice: String?
+
+    /// From ClipService change events (R9): only new captures and clear-all change the list from outside;
+    /// the panel's own delete / pin update it locally.
+    func storeChanged(_ event: ClipEvent) {
+        switch event {
+        case .captured:
+            switch phase {
+            case .browsing: Task { await mergeFirstPage() }
+            case .results, .searching: newContentWhileSearching = true   // don't reshuffle results (E24)
+            case .failed: refresh()
+            }
+        case .cleared: refresh()
+        default: break
         }
+    }
+
+    /// Browsing: put the newest page on top and keep the rows already loaded below it (E24, R9),
+    /// so the scroll position and selection survive.
+    private func mergeFirstPage() async {
+        let id = gate.next()
+        guard let page = try? await service.page(after: nil, kind: kind, limit: Self.pageSize), gate.accepts(id) else { return }
+        let top = Set(page.map(\.id))
+        let merged = page.map { Row(item: $0, sources: [], similarity: nil) } + rows.filter { !top.contains($0.id) }
+        rows = Array(merged.prefix(Self.maxRowsInMemory))
+        fixSelection()
     }
 
     func panelWillClose() {

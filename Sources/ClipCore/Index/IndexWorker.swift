@@ -40,7 +40,8 @@ public actor IndexWorker {
     var activeModelIDs: [String] { backends.values.map(\.provider.modelID) }
 
     /// Processes claimable jobs until none are left (respecting backoff). Used by CLI `--run-jobs` and the loop.
-    public func drain(batch: Int = 16) async -> DrainReport {
+    /// One job per claim so each job gets its own full lease (R12).
+    public func drain(batch: Int = 1) async -> DrainReport {
         var report = DrainReport()
         while true {
             let jobs: [IndexJob]
@@ -84,7 +85,7 @@ public actor IndexWorker {
         } catch {
             Log.shared.event("jobs.error", ["kind": .label(job.kind), "item": .int(job.itemID), "error": .error(error)])
             do {
-                try await db.failJob(id: job.id, error: String(describing: error), maxAttempts: maxAttempts)
+                try await db.failJob(job: job, error: String(describing: error), maxAttempts: maxAttempts)
                 if job.attempts + 1 >= maxAttempts { report.failed += 1 } else { report.retried += 1 }
             } catch {
                 Log.shared.event("jobs.fail_record_failed", ["error": .error(error)])
@@ -94,7 +95,7 @@ public actor IndexWorker {
 
     /// The job has nothing left to act on (item deleted / no content): remove it without a result.
     private func drop(_ job: IndexJob, _ report: inout DrainReport) async throws {
-        _ = try await db.completeVision(job: IndexJob(id: job.id, itemID: -1, kind: job.kind, modelID: job.modelID, attempts: job.attempts),
+        _ = try await db.completeVision(job: IndexJob(id: job.id, itemID: -1, kind: job.kind, modelID: job.modelID, attempts: job.attempts, leaseUntil: job.leaseUntil),
                                         result: OCRResult(text: "", labels: []))
         report.dropped += 1
     }

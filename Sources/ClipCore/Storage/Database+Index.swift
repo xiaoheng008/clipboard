@@ -24,6 +24,8 @@ public struct IndexJob: Sendable, Equatable {
     public let kind: String      // "vision" | "embed"
     public let modelID: String
     public let attempts: Int
+    /// The lease this claim holds; complete/fail only take effect while it is still ours (R12).
+    public var leaseUntil: Int64 = 0
 }
 
 public struct SemanticCoverage: Sendable, Equatable {
@@ -49,7 +51,7 @@ extension Database {
         let t = now()
         let models = activeModels.isEmpty ? ["\u{0}"] : activeModels
         return try conn.transaction {
-            let jobs = try conn.query("""
+            var jobs = try conn.query("""
                 SELECT id, item_id, kind, model_id, attempts FROM index_jobs
                 WHERE ((state = 'pending' AND not_before <= ?) OR (state = 'running' AND lease_until < ?))
                   AND (kind = 'vision' OR model_id IN (\(models.map { _ in "?" }.joined(separator: ","))))
@@ -57,8 +59,9 @@ extension Database {
                 """, [t, t] + models + [limit]) {
                 IndexJob(id: $0.int(0), itemID: $0.int(1), kind: $0.text(2) ?? "", modelID: $0.text(3) ?? "", attempts: Int($0.int(4)))
             }
-            for j in jobs {
-                try conn.run("UPDATE index_jobs SET state = 'running', lease_until = ? WHERE id = ?", [t + leaseMs, j.id])
+            for i in jobs.indices {
+                try conn.run("UPDATE index_jobs SET state = 'running', lease_until = ? WHERE id = ?", [t + leaseMs, jobs[i].id])
+                jobs[i].leaseUntil = t + leaseMs
             }
             return jobs
         }
@@ -79,8 +82,14 @@ extension Database {
     }
 
     /// Result + job deletion in one transaction. false = item gone; the job row went with it.
+    /// True while `job`'s claim still owns the row (not reclaimed by another process, not deleted).
+    func ownsLease(_ job: IndexJob) throws -> Bool {
+        try conn.scalarInt("SELECT count(*) FROM index_jobs WHERE id = ? AND state = 'running' AND lease_until = ?", [job.id, job.leaseUntil]) > 0
+    }
+
     public func completeVision(job: IndexJob, result: OCRResult) throws -> Bool {
         try conn.transaction {
+            guard try ownsLease(job) else { return false }
             let ok = try writeVision(itemID: job.itemID, ocr: result.text, labels: result.labels.joined(separator: " "))
             try conn.run("DELETE FROM index_jobs WHERE id = ?", [job.id])
             return ok
@@ -90,6 +99,7 @@ extension Database {
     /// UPSERT so a job processed twice (expired lease) is idempotent.
     public func completeEmbedding(job: IndexJob, vector: [Float]) throws -> Bool {
         try conn.transaction {
+            guard try ownsLease(job) else { return false }
             let exists = try conn.scalarInt("SELECT count(*) FROM items WHERE id = ?", [job.itemID]) > 0
             if exists {
                 try conn.run("""
@@ -103,9 +113,11 @@ extension Database {
     }
 
     /// attempts+1; below the limit → pending with exponential backoff (2^attempts s), else failed.
-    public func failJob(id: Int64, error: String, maxAttempts: Int) throws {
+    public func failJob(job: IndexJob, error: String, maxAttempts: Int) throws {
         let t = now()
         try conn.transaction {
+            guard try ownsLease(job) else { return }      // reclaimed meanwhile: the new owner decides
+            let id = job.id
             guard let attempts = try conn.query("SELECT attempts FROM index_jobs WHERE id = ?", [id], { Int($0.int(0)) }).first else { return }
             let next = attempts + 1
             if next >= maxAttempts {

@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var settingsModel: SettingsModel?
     private var accessDenied = false
     private var toast: NSPanel?
+    private var syncTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMainMenu()
@@ -40,7 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             panelModel = model
             await rt.service.setChangeHandler { [weak self] event in
                 Task { @MainActor in
-                    if event == .itemsChanged { self?.panelModel?.storeChanged() }
+                    self?.panelModel?.storeChanged(event)
                     if case .modelChanged = event { Task { await self?.settingsModel?.reload() } }
                 }
             }
@@ -56,6 +57,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 }
             }
             rebuildMenu()
+            // R8: pick up model changes / vectors written by the CLI.
+            syncTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [service = rt.service] _ in
+                Task { await service.syncWithStore() }
+            }
         } catch {
             let alert = NSAlert()
             alert.messageText = "ClipVault 无法启动"
@@ -162,6 +167,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             panel = p
         }
         guard let panel else { return }
+        if let rt { Task { await rt.service.syncWithStore() } }
         model.hotkeyDisplay = HotKeyCenter.shared.registered?.display
         model.panelDidOpen()
         let mouse = NSEvent.mouseLocation

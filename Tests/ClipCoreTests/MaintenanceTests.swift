@@ -69,7 +69,7 @@ import Testing
         // Make the vision job fail terminally.
         for _ in 0..<3 {
             let jobs = try await rt.db.claimJobs(limit: 5, activeModel: nil, leaseMs: 1)
-            for j in jobs { try await rt.db.failJob(id: j.id, error: "x", maxAttempts: 3) }
+            for j in jobs { try await rt.db.failJob(job: j, error: "x", maxAttempts: 3) }
             try await rt.db.forceJobsClaimable()
         }
         #expect(try await rt.db.counts().jobsFailed == 1)

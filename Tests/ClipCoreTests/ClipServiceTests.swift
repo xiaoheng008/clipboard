@@ -210,3 +210,80 @@ final class FakeWriter: PasteboardWriting, @unchecked Sendable {
         #expect(r.hits.first?.sources == [.semantic])
     }
 }
+
+@Suite struct ReviewP1Tests {
+    var ctx: CaptureContext { CaptureContext(frontmostBundleID: nil, frontmostName: nil, excludedBundleIDs: [], lastSelfWriteChangeCount: nil) }
+
+    final class CountingTranslator: QueryTranslator, @unchecked Sendable {
+        let calls = Counter()
+        func toEnglish(_ text: String) async -> String? { _ = calls.increment(); return "cat" }
+    }
+
+    func services(_ t: QueryTranslator = NoTranslator()) -> PlatformServices {
+        PlatformServices(ocr: FakeOCR(), translator: t, pasteboard: FakeWriter(),
+                         makeProvider: { m in var e = FakeEmbedder(); e.modelID = m.id; e.dimension = m.dim; return e }, memoryGB: { 16 })
+    }
+
+    // R5 — a multilingual image model gets the Chinese query as-is; English-only models are translated.
+    @Test func multilingualModelSkipsTranslation() async throws {
+        let t = CountingTranslator()
+        let rt = try await Runtime.open(home: try makeTempHome(), services: services(t), startWorker: false)
+        try await rt.service.activateModel(id: "siglip2-base@1", requireInstalled: false)
+        let r = await rt.service.search(SearchRequest(requestID: 1, text: "大海", kind: .image, semantic: true, limit: 5))
+        #expect(t.calls.value == 0 && !r.untranslatedCJK)
+        try await rt.service.activateModel(id: "mobileclip-s0@1", requireInstalled: false)
+        _ = await rt.service.search(SearchRequest(requestID: 2, text: "大海", kind: .image, semantic: true, limit: 5))
+        #expect(t.calls.value == 1)
+    }
+
+    // R8 — model changes and vectors written by another process (CLI) reach the running app on sync.
+    @Test func appPicksUpChangesFromAnotherProcess() async throws {
+        let home = try makeTempHome()
+        let app = try await Runtime.open(home: home, services: services(), startWorker: false, requireInstalledModel: false)
+        let image = PasteboardSnapshot(changeCount: 1, types: ["public.png"], image: CapturedImage(data: pngBytes(seed: 3), uti: "public.png", width: 1, height: 1))
+        _ = await app.service.ingest(image, context: ctx)
+        let cli = try await Runtime.open(home: home, services: services(), startWorker: false, sweepTmp: false)
+        try await cli.service.activateModel(id: "siglip2-base@1", requireInstalled: false)
+        _ = await cli.worker.drain()
+        #expect(await app.service.activeModelManifest(slot: .image) == nil)
+        await app.service.syncWithStore()
+        #expect(await app.service.activeModelManifest(slot: .image)?.id == "siglip2-base@1")
+        #expect(await app.engine.activeIndex?.count() == 1)
+        try await cli.service.deactivateModel(slot: .image)
+        await app.service.syncWithStore()
+        #expect(await app.service.activeModelManifest(slot: .image) == nil)
+    }
+
+    // R9 — only captures emit `.captured`; the user's own delete / pin do not.
+    @Test func capturedEventOnlyForCaptures() async throws {
+        let rt = try await Runtime.open(home: try makeTempHome(), services: services(), startWorker: false)
+        let events = EventLog()
+        await rt.service.setChangeHandler { events.append($0) }
+        guard case .stored(let id, _) = await rt.service.ingest(textSnapshot("one"), context: ctx) else { Issue.record("ingest"); return }
+        try await rt.service.setPinned(id: id, true)
+        try await rt.service.delete(id: id)
+        #expect(events.all.filter { if case .captured = $0 { true } else { false } }.count == 1)
+    }
+
+    // R11 — the semantic status says why: not enabled / unavailable / not applicable to the filter.
+    @Test func semanticStatusExplainsWhy() async throws {
+        let rt = try await Runtime.open(home: try makeTempHome(), services: services(), startWorker: false)
+        #expect(await rt.service.search(SearchRequest(requestID: 1, text: "x", kind: .all, semantic: true, limit: 5)).semantic == .notEnabled)
+        try await rt.service.activateModel(id: "siglip2-base@1", requireInstalled: false)
+        #expect(await rt.service.search(SearchRequest(requestID: 2, text: "x", kind: .file, semantic: true, limit: 5)).semantic == .notApplicable)
+        #expect(await rt.service.search(SearchRequest(requestID: 3, text: "x", kind: .text, semantic: true, limit: 5)).semantic == .notApplicable)
+        // Restore failure (model files gone): unavailable, not "not enabled".
+        let failing = PlatformServices(ocr: nil, translator: NoTranslator(), pasteboard: FakeWriter(),
+                                       makeProvider: { _ in throw ProviderError.modelUnavailable("gone") }, memoryGB: { 16 })
+        let rt2 = try await Runtime.open(home: rt.home, services: failing, startWorker: false, requireInstalledModel: false, sweepTmp: false)
+        guard case .unavailable = await rt2.service.search(SearchRequest(requestID: 4, text: "x", kind: .all, semantic: true, limit: 5)).semantic else {
+            Issue.record("expected .unavailable"); return
+        }
+    }
+}
+
+final class EventLog: @unchecked Sendable {
+    private let lock = NSLock(); private var events: [ClipEvent] = []
+    func append(_ e: ClipEvent) { lock.lock(); events.append(e); lock.unlock() }
+    var all: [ClipEvent] { lock.lock(); defer { lock.unlock() }; return events }
+}

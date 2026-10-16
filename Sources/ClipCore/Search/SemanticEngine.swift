@@ -6,6 +6,8 @@ public enum SemanticStatus: Sendable, Equatable {
     case textQueriesUnsupported           // active provider is image-only (e.g. Vision feature print)
     case ready(translated: String?)       // translated = the English query actually embedded, if any
     case failed(String)
+    case unavailable(String)              // a model is configured but could not be loaded (E17)
+    case notApplicable                    // models are enabled, but none covers the current kind filter
 }
 
 public struct SemanticResult: Sendable, Equatable {
@@ -27,14 +29,20 @@ public actor SemanticEngine {
     private let translator: QueryTranslator
     private var queryCache: [String: [Float]] = [:]
     private var translationCache: [String: String] = [:]
+    /// False for multilingual models: they take the query as typed (R5).
+    private var translates = true
 
     public init(translator: QueryTranslator) { self.translator = translator }
 
-    public func activate(provider: EmbeddingProvider?, index: VectorIndex?) {
+    public func activate(provider: EmbeddingProvider?, index: VectorIndex?, translate: Bool = true) {
         self.provider = provider
         self.index = index
+        translates = translate
         queryCache.removeAll()
     }
+
+    /// Swap in a freshly loaded index (vectors written by another process, R8).
+    public func replaceIndex(_ index: VectorIndex) { self.index = index }
 
     public var activeModelID: String? { provider?.modelID }
     public var activeIndex: VectorIndex? { index }
@@ -55,7 +63,7 @@ public actor SemanticEngine {
         var text = q
         var translated: String?
         var untranslated = false
-        if QueryPlanner.containsCJK(q) {
+        if translates && QueryPlanner.containsCJK(q) {
             if let cached = translationCache[q] { translated = cached }
             else if let en = await translator.toEnglish(q), !en.isEmpty { translated = en; translationCache[q] = en }
             if let translated { text = translated } else { untranslated = true }

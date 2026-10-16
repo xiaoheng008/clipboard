@@ -161,6 +161,7 @@ struct PanelView: View {
             Text("⌘P 置顶").foregroundStyle(.secondary)
             Text("esc 关闭").foregroundStyle(.secondary)
             Spacer()
+            if let n = model.notice { Text(n).foregroundStyle(.red).lineLimit(1) }
             if let hk = model.hotkeyDisplay {
                 Text("唤起：\(hk)").foregroundStyle(.secondary)
             } else {

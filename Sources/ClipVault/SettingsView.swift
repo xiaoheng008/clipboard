@@ -42,6 +42,10 @@ final class SettingsModel {
     func reload() async {
         let stored = try? await rt.db.setting(SettingKey.hotkey)
         if let h = HotKeyCombo.resolve(setting: stored) { hotkeyText = h.display + (stored == nil ? "（默认）" : "") } else { hotkeyText = "未设置" }
+        // R6: say so when the combination is taken (e.g. by an input method or launcher).
+        if let f = HotKeyCenter.shared.failed {
+            hotkeyError = "\(f.display) 已被系统或其他 App 占用，未生效" + (HotKeyCenter.shared.registered.map { "；当前仍是 \($0.display)" } ?? "；请录制其他组合")
+        }
         excluded = await rt.service.excludedApps()
         if let c = try? await rt.service.counts() {
             stats = "\(c.items) 条历史（图片 \(c.images)） · 图片占用 \(ByteCountFormatter.string(fromByteCount: rt.blobs.totalBytes(), countStyle: .file))"
@@ -59,7 +63,10 @@ final class SettingsModel {
     func record(_ event: NSEvent) {
         recording = false
         guard let combo = HotKeyCombo(event: event) else { hotkeyError = "需要包含 ⌘、⌥ 或 ⌃"; return }
-        if onHotkeyChanged?(combo) == false { hotkeyError = "\(combo.display) 已被系统或其他 App 占用"; return }
+        if onHotkeyChanged?(combo) == false {
+            hotkeyError = "\(combo.display) 已被系统或其他 App 占用" + (HotKeyCenter.shared.registered.map { "，仍使用 \($0.display)" } ?? "")
+            return
+        }
         hotkeyError = nil
         Task { try? await rt.db.setSetting(SettingKey.hotkey, combo.setting); await reload() }
     }
@@ -159,8 +166,13 @@ final class SettingsModel {
         }
     }
 
+    var clearError: String?
+
     func clearAll() {
-        Task { try? await rt.service.clearAll(); await reload() }
+        Task {
+            do { try await rt.service.clearAll(); clearError = nil } catch { clearError = "清空失败，数据未改动：\(error)" }   // R7
+            await reload()
+        }
     }
 }
 
@@ -216,6 +228,7 @@ struct GeneralTab: View {
                 Text(model.stats)
                 Text("数据位置：\(model.rt.home.root.path)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                 Button("清空全部历史…", role: .destructive) { model.confirmClear = true }
+                if let e = model.clearError { Text(e).foregroundStyle(.red).font(.caption) }
             }
         }
         .formStyle(.grouped)

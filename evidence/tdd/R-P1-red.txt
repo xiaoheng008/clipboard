@@ -1,0 +1,4 @@
+Tests/ClipCoreTests/IndexWorkerTests.swift failed with a nonzero exit code. Command line:     cd /Users/xiaoheng/Program/app
+Tests/ClipCoreTests/IndexWorkerTests.swift:157:29: [1;31merror: [1;39mincorrect argument label in call (have 'job:error:maxAttempts:', expected 'id:
+Tests/ClipCoreTests/IndexWorkerTests.swift:157:40: [1;31merror: [1;39mcannot convert value of type 'IndexJob' to expected argument type 'Int64'[0;0
+Tests/ClipCoreTests/IndexWorkerTests.swift:169:29: [1;31merror: [1;39mtype 'Diagnostics' has no member 'diskStatus'[0;0m

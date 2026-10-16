@@ -73,6 +73,24 @@ public final class Log: @unchecked Sendable {
         size = 0
     }
 
+    /// Counts `event` lines in the current log file newer than `within` seconds (reads at most the last 2 MB).
+    public func recentCount(of event: String, within: TimeInterval) -> Int {
+        lock.lock(); let url = fileURL; lock.unlock()
+        guard let url, let fh = try? FileHandle(forReadingFrom: url) else { return 0 }
+        defer { try? fh.close() }
+        let size = (try? fh.seekToEnd()) ?? 0
+        try? fh.seek(toOffset: size > 2_000_000 ? size - 2_000_000 : 0)
+        guard let data = try? fh.readToEnd(), let text = String(data: data, encoding: .utf8) else { return 0 }
+        let cutoff = Date(timeIntervalSinceNow: -within)
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var n = 0
+        for line in text.split(separator: "\n") where line.contains(" \(event)") {
+            if let ts = line.split(separator: " ").first, let d = parser.date(from: String(ts)), d >= cutoff { n += 1 }
+        }
+        return n
+    }
+
     /// Copies all log files into `directory`. Logs never contain clipboard content.
     public func export(to directory: URL) throws -> [URL] {
         lock.lock(); let base = fileURL; lock.unlock()
