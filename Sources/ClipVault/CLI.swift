@@ -208,11 +208,19 @@ enum CLI {
             let images = Int(try option(rest, "--images") ?? "100000") ?? 100_000
             let dim = Int(try option(rest, "--dim") ?? "512") ?? 512
             // AC15.1: never touches the real library.
-            let root = FileManager.default.temporaryDirectory.appendingPathComponent("clipvault-bench-\(UUID().uuidString)")
+            let tmp = FileManager.default.temporaryDirectory
+            // Runs that were killed cannot clean up after themselves: remove their leftovers (> 1 h old).
+            for name in (try? FileManager.default.contentsOfDirectory(atPath: tmp.path)) ?? [] where name.hasPrefix("clipvault-bench-") {
+                let u = tmp.appendingPathComponent(name)
+                if ((try? u.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) < Date(timeIntervalSinceNow: -3600) {
+                    try? FileManager.default.removeItem(at: u)
+                }
+            }
+            let root = tmp.appendingPathComponent("clipvault-bench-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: root) }
             let home = try AppHome(root: root)
             print("bench home: \(root.path)")
             let r = try await Bench.run(home: home, items: items, images: images, dim: dim) { print($0) }
-            try? FileManager.default.removeItem(at: root)
             print(r.budgetsMet ? "ALL BUDGETS MET" : "SOME BUDGETS MISSED")
             return r.budgetsMet ? 0 : 1
 

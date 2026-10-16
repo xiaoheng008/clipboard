@@ -1,11 +1,24 @@
 import Foundation
 @testable import ClipCore
 
+/// All test homes live under one parent; leftovers from earlier runs (> 10 min old) are removed once
+/// per test process, so repeated runs do not accumulate temp data.
+let testRoot: URL = {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("clipvault-tests", isDirectory: true)
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let cutoff = Date(timeIntervalSinceNow: -600)
+    for name in (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? [] {
+        let u = root.appendingPathComponent(name)
+        if ((try? u.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) < cutoff {
+            try? FileManager.default.removeItem(at: u)
+        }
+    }
+    return root
+}()
+
 /// A throwaway CLIPVAULT_HOME per test.
 func makeTempHome() throws -> AppHome {
-    let url = FileManager.default.temporaryDirectory
-        .appendingPathComponent("clipvault-tests-\(UUID().uuidString)", isDirectory: true)
-    return try AppHome(root: url)
+    try AppHome(root: testRoot.appendingPathComponent(UUID().uuidString, isDirectory: true))
 }
 
 /// Deterministic clock for lease / backoff tests.

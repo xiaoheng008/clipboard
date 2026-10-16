@@ -4,8 +4,22 @@ import ClipCore
 import Foundation
 import Testing
 
+/// Shares the parent directory and stale-run cleanup with ClipCoreTests' test homes.
+let platformTestRoot: URL = {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("clipvault-ptests", isDirectory: true)
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let cutoff = Date(timeIntervalSinceNow: -600)
+    for name in (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? [] {
+        let u = root.appendingPathComponent(name)
+        if ((try? u.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) < cutoff {
+            try? FileManager.default.removeItem(at: u)
+        }
+    }
+    return root
+}()
+
 func tempHome() throws -> AppHome {
-    try AppHome(root: FileManager.default.temporaryDirectory.appendingPathComponent("clipvault-ptests-\(UUID().uuidString)"))
+    try AppHome(root: platformTestRoot.appendingPathComponent(UUID().uuidString, isDirectory: true))
 }
 
 /// Renders text into a PNG (for OCR tests with known ground truth).
