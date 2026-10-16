@@ -52,7 +52,9 @@ open dist/ClipVault.app       # 启动后出现在菜单栏
 | 按意思搜文本 | Multilingual E5 Small | 约 240 MB | Microsoft，MIT，中英文 |
 | 轻量搜图（英文） | MobileCLIP S0 / S2 / B-LT | 100–290 MB | Apple，适合内存较小的机器 |
 
-模型只在点击「下载」时联网获取，校验 SHA-256 后完全离线运行。启用后，已有的历史会在后台自动建立索引。
+模型只在点击「下载」时联网获取（显示实时进度，可随时取消），校验 SHA-256 后完全离线运行。启用后，已有的历史会在后台自动建立索引；切换模型时，新模型加载完成前搜索继续使用旧模型。
+
+语义结果的严格程度可以按模型调整：「设置 › 模型」里的「相似度下限」和「与最佳结果最大差距」。调低下限、调大差距，会返回更多「意思相近」的结果。
 
 ## 命令行
 
@@ -64,6 +66,8 @@ $ClipVault --diagnose               # 自检：权限、数据完整性、模型
 $ClipVault --search "海边的日落"      # 在终端里搜索
 $ClipVault --model list             # 查看 / 安装 / 启用模型
 $ClipVault --login-item status      # 登录时启动的状态（on / off 开关）
+$ClipVault --slow-ops               # 最慢的按钮操作（保留最慢 1000 次，用于性能优化）
+$ClipVault --model threshold multilingual-e5-small@1 --floor 0.85 --margin 0.06   # 调整语义阈值
 $ClipVault --help                   # 全部命令
 ```
 
