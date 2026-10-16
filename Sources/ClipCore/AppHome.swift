@@ -1,6 +1,6 @@
 import Foundation
 
-/// On-disk layout. Everything the app owns lives under one root (see 2-architecture.md).
+/// On-disk layout. Everything the app owns lives under one root (see 2.1-architecture.md).
 public struct AppHome: Sendable {
     public let root: URL
 

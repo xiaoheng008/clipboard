@@ -18,7 +18,7 @@ import Testing
 @Suite struct MaintenanceTests {
     func runtime() async throws -> Runtime {
         let services = PlatformServices(ocr: FakeOCR(), translator: NoTranslator(), pasteboard: FakeWriter(),
-                                        makeProvider: { m in var e = FakeEmbedder(); e.modelID = m.id; return e }, memoryGB: { 16 })
+                                        makeProvider: { m in var e = FakeEmbedder(); e.modelID = m.id; e.dimension = m.dim; return e }, memoryGB: { 16 })
         return try await Runtime.open(home: try makeTempHome(), services: services, startWorker: false)
     }
 
@@ -94,6 +94,16 @@ import Testing
         #expect(all.deleted == 1)
         #expect(try await rt.db.semanticCoverage(modelID: "mobileclip-s2@1").indexed == 1)
         #expect(try await rt.db.semanticCoverage(modelID: "mobileclip-s0@1").indexed == 0)
+    }
+
+    // FR20 — the active text model's vectors are never "inactive".
+    @Test func purgeKeepsActiveTextModel() async throws {
+        let rt = try await runtime()
+        try await rt.service.activateModel(id: "multilingual-e5-small@1", requireInstalled: false)
+        _ = await rt.service.ingest(textSnapshot("hello world"), context: ctx)
+        _ = await rt.worker.drain()
+        let dry = try await Maintenance.purgeInactive(rt, scope: .dryRun)
+        #expect(dry.byModel.isEmpty && dry.active == ["multilingual-e5-small@1"])
     }
 }
 

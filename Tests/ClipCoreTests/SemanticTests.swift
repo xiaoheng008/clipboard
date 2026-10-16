@@ -89,7 +89,9 @@ import Testing
 @Suite struct ModelManifestTests {
     @Test func builtinCatalogDecodesAndIsComplete() throws {
         let catalog = try ModelCatalog.builtin()
-        #expect(catalog.models.map(\.id) == ["mobileclip-s0@1", "mobileclip-s2@1", "mobileclip-blt@1", "vision-featureprint@1"])
+        #expect(catalog.models.map(\.id) == ["mobileclip-s0@1", "mobileclip-s2@1", "mobileclip-blt@1", "siglip2-base@1", "multilingual-e5-small@1", "vision-featureprint@1"])
+        #expect(catalog.model(id: "siglip2-base@1")?.files.count == 7)
+        #expect(catalog.model(id: "multilingual-e5-small@1")?.slot == .text)
         for m in catalog.models where m.family == "coreml-clip" {
             #expect(m.files.count == 8, "\(m.id)")   // 2 packages × 3 files + vocab + merges
             #expect(m.files.allSatisfy { $0.sha256.count == 64 && $0.size > 0 && $0.url.hasPrefix("https://huggingface.co/") })
@@ -97,7 +99,8 @@ import Testing
     }
 
     // AC9.1 / H8
-    @Test(arguments: [(8, "mobileclip-s0@1"), (16, "mobileclip-s2@1"), (24, "mobileclip-s2@1"), (32, "mobileclip-blt@1"), (64, "mobileclip-blt@1")])
+    // H8 (revised with Q9): SigLIP2 (bilingual) wherever it fits; MobileCLIP S0 below 8 GB.
+    @Test(arguments: [(4, "mobileclip-s0@1"), (8, "siglip2-base@1"), (16, "siglip2-base@1"), (32, "siglip2-base@1"), (64, "siglip2-base@1")])
     func recommendation(memoryGB: Int, expected: String) throws {
         #expect(try ModelCatalog.builtin().recommended(memoryGB: memoryGB)?.id == expected)
     }
@@ -111,7 +114,7 @@ import Testing
         let merged = try ModelCatalog.builtin().merging(customJSON: Data(custom.utf8))
         #expect(merged.model(id: "my-clip@1")?.dim == 768)
         #expect(merged.model(id: "weird@1")?.isSupportedFamily == false)
-        #expect(merged.models.count == 6)
+        #expect(merged.models.count == 8)
     }
 }
 
@@ -152,5 +155,42 @@ import Testing
         let engine = SemanticEngine(translator: NoTranslator())
         await engine.activate(provider: ImageOnly(), index: FlatVectorIndex(modelID: "fp@1", dimension: 4))
         #expect(await engine.search("cat", k: 5).status == .textQueriesUnsupported)
+    }
+}
+
+@Suite struct SemanticFilterTests {
+    func s(_ id: Int64, _ v: Float) -> SemanticScore { SemanticScore(id: id, score: v) }
+
+    // AC19.5
+    @Test func keepsHitsNearBestAboveFloor() {
+        let hits = [s(3, 0.148), s(11, 0.130), s(12, 0.077), s(1, 0.048)]
+        #expect(SemanticFilter.apply(hits, floor: 0.10, margin: 0.05).map(\.id) == [3, 11])
+        #expect(SemanticFilter.apply(hits, floor: 0.20, margin: 0.05).isEmpty)        // nothing relevant enough
+        #expect(SemanticFilter.apply([], floor: 0, margin: 1).isEmpty)
+    }
+}
+
+@Suite struct Int8VectorIndexTests {
+    // AC19.6 — top-K overlap with exact fp32 search ≥ 0.95.
+    @Test func topKOverlapWithExact() async {
+        var rng = SystemRandomNumberGenerator()
+        let dim = 384
+        let index = Int8VectorIndex(modelID: "t@1", dimension: dim)
+        var exact: [Int64: [Float]] = [:]
+        for id in 1...10_000 {
+            let v = VectorCodec.normalized((0..<dim).map { _ in Float.random(in: -1...1, using: &rng) })
+            exact[Int64(id)] = v
+            await index.upsert(id: Int64(id), vector: v)
+        }
+        var overlap = 0.0
+        for _ in 0..<10 {
+            let q = VectorCodec.normalized((0..<dim).map { _ in Float.random(in: -1...1, using: &rng) })
+            let got = Set(await index.search(q, k: 20).map(\.id))
+            let truth = Set(exact.map { ($0.key, zip($0.value, q).reduce(Float(0)) { $0 + $1.0 * $1.1 }) }.sorted { $0.1 > $1.1 }.prefix(20).map(\.0))
+            overlap += Double(got.intersection(truth).count) / 20
+        }
+        #expect(overlap / 10 >= 0.95)
+        await index.remove(ids: [1, 2])
+        #expect(await index.count() == 9_998)
     }
 }

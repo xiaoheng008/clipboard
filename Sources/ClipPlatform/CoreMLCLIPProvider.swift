@@ -78,6 +78,8 @@ public enum ProviderRegistry {
     public static func make(_ manifest: ModelManifest, home: AppHome) throws -> EmbeddingProvider {
         switch manifest.family {
         case "coreml-clip": return try CoreMLCLIPProvider(manifest: manifest, home: home)
+        case "coreml-siglip": return try CoreMLSigLIPProvider(manifest: manifest, home: home)
+        case "coreml-text-embed": return try CoreMLTextEmbeddingProvider(manifest: manifest, home: home)
         case "vision-featureprint": return VisionFeaturePrintProvider(manifest: manifest)
         default: throw ProviderError.unsupported("model family \(manifest.family)")
         }

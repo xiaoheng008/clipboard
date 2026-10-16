@@ -12,8 +12,8 @@ final class SettingsModel {
     var recording = false
     var excluded: [String] = []
     var stats = ""
-    var active: String?
-    var coverage: SemanticCoverage?
+    var active: [ModelSlot: String] = [:]
+    var coverage: [ModelSlot: SemanticCoverage] = [:]
     var vectorCounts: [String: Int] = [:]
     var installing: [String: Double] = [:]
     var modelError: String?
@@ -34,7 +34,7 @@ final class SettingsModel {
 
     var catalog: [ModelManifest] { rt.service.catalog.models }
     var memoryGB: Int { HardwareProbe.memoryGB }
-    var recommendedID: String? { rt.service.catalog.recommended(memoryGB: memoryGB)?.id }
+    func recommendedID(_ slot: ModelSlot) -> String? { rt.service.catalog.recommended(memoryGB: memoryGB, slot: slot)?.id }
     func installed(_ m: ModelManifest) -> Bool { ModelPaths.isInstalled(home: rt.home, model: m) }
 
     func reload() async {
@@ -44,8 +44,10 @@ final class SettingsModel {
         if let c = try? await rt.service.counts() {
             stats = "\(c.items) 条历史（图片 \(c.images)） · 图片占用 \(ByteCountFormatter.string(fromByteCount: rt.blobs.totalBytes(), countStyle: .file))"
         }
-        active = await rt.service.activeModelManifest()?.id
-        if let active { coverage = try? await rt.service.coverage(modelID: active) } else { coverage = nil }
+        for slot in ModelSlot.allCases {
+            active[slot] = await rt.service.activeModelManifest(slot: slot)?.id
+            if let id = active[slot] { coverage[slot] = try? await rt.service.coverage(modelID: id) } else { coverage[slot] = nil }
+        }
         vectorCounts = (try? await rt.service.embeddingCounts()) ?? [:]
         modelError = await rt.service.activationError
     }
@@ -101,13 +103,13 @@ final class SettingsModel {
         }
     }
 
-    func deactivate() {
-        Task { try? await rt.service.deactivateModel(); await reload() }
+    func deactivate(_ slot: ModelSlot) {
+        Task { try? await rt.service.deactivateModel(slot: slot); await reload() }
     }
 
     func remove(_ m: ModelManifest) {
         Task {
-            if active == m.id { try? await rt.service.deactivateModel() }
+            if active[m.slot] == m.id { try? await rt.service.deactivateModel(slot: m.slot) }
             try? await installer.remove(m.id)
             await reload()
         }
@@ -247,17 +249,10 @@ struct ModelsTab: View {
         Form {
             Section("本机") {
                 Text("\(HardwareProbe.cpuBrand) · \(model.memoryGB) GB 内存")
-                if let rec = model.recommendedID { Text("推荐模型：\(rec)").foregroundStyle(.secondary) }
-                if let a = model.active, let c = model.coverage {
-                    Text("当前启用：\(a) · 已建语义索引 \(c.indexed)/\(c.images) 张图片" + (c.pending > 0 ? "（进行中 \(c.pending)）" : "") + (c.failed > 0 ? " · 失败 \(c.failed)" : ""))
-                } else {
-                    Text("语义搜图未启用（文字与图中文字搜索不受影响）").foregroundStyle(.secondary)
-                }
                 if let e = model.modelError { Text(e).foregroundStyle(.red).font(.caption) }
             }
-            Section("可用模型（下载后完全离线运行）") {
-                ForEach(model.catalog) { m in row(m) }
-            }
+            slotSection(.image, title: "图片搜索模型（用文字描述找图片）")
+            slotSection(.text, title: "文本语义模型（按意思找历史文本，中英互通）")
             Section("向量数据") {
                 HStack {
                     Button("清理未启用模型的向量…") { model.purgePreview(); model.confirmPurge = true }
@@ -273,13 +268,25 @@ struct ModelsTab: View {
         } message: { Text(model.purgeInfo ?? "正在统计…") }
     }
 
+    @ViewBuilder private func slotSection(_ slot: ModelSlot, title: String) -> some View {
+        Section(title) {
+            if let a = model.active[slot], let c = model.coverage[slot] {
+                let noun = slot == .image ? "张图片" : "条文本"
+                Text("当前启用：\(a) · 已建索引 \(c.indexed)/\(c.images) \(noun)" + (c.pending > 0 ? "（进行中 \(c.pending)）" : "") + (c.failed > 0 ? " · 失败 \(c.failed)" : ""))
+            } else {
+                Text(slot == .image ? "未启用：图片只能按图中文字搜索" : "未启用：文本只能按关键词搜索").foregroundStyle(.secondary)
+            }
+            ForEach(model.catalog.filter { $0.slot == slot }) { m in row(m) }
+        }
+    }
+
     @ViewBuilder private func row(_ m: ModelManifest) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(m.displayName)
-                    if m.id == model.recommendedID { Text("推荐").font(.caption2).padding(.horizontal, 4).background(.tint.opacity(0.2), in: Capsule()) }
-                    if m.id == model.active { Text("已启用").font(.caption2).padding(.horizontal, 4).background(.green.opacity(0.25), in: Capsule()) }
+                    if m.id == model.recommendedID(m.slot) { Text("推荐").font(.caption2).padding(.horizontal, 4).background(.tint.opacity(0.2), in: Capsule()) }
+                    if m.id == model.active[m.slot] { Text("已启用").font(.caption2).padding(.horizontal, 4).background(.green.opacity(0.25), in: Capsule()) }
                 }
                 Text(subtitle(m)).font(.caption).foregroundStyle(.secondary)
             }
@@ -290,8 +297,8 @@ struct ModelsTab: View {
                 Text("不支持").foregroundStyle(.secondary)
             } else if !model.installed(m) {
                 Button("下载") { model.install(m) }
-            } else if m.id == model.active {
-                Button("停用") { model.deactivate() }
+            } else if m.id == model.active[m.slot] {
+                Button("停用") { model.deactivate(m.slot) }
             } else {
                 Button("启用") { model.activate(m) }
                 if m.requiresInstall { Button("删除文件") { model.remove(m) } }
@@ -302,7 +309,8 @@ struct ModelsTab: View {
     private func subtitle(_ m: ModelManifest) -> String {
         var parts: [String] = [m.id]
         parts.append(m.requiresInstall ? String(format: "%.0f MB", Double(m.downloadBytes) / 1_048_576) : "系统内置")
-        parts.append(m.supportsTextQueries ? "以文搜图" : "仅以图搜图")
+        if m.slot == .image { parts.append(m.supportsTextQueries ? (m.isMultilingual ? "中英文搜图" : "英文搜图") : "仅以图搜图") }
+        else { parts.append(m.isMultilingual ? "中英文" : "单语言") }
         if m.minMemoryGB > 0 { parts.append("建议 ≥\(m.minMemoryGB) GB") }
         if let n = model.vectorCounts[m.id] { parts.append("已有向量 \(n)") }
         return parts.joined(separator: " · ")

@@ -12,13 +12,14 @@ enum CLI {
       --diagnose                         self-check; exit 1 on any FAIL
       --verify                           check storage invariants (read-only)
       --list [--limit N] [--kind K]      recent items
-      --search <query> [--kind K] [--limit N] [--no-semantic]
+      --search <query> [--kind K] [--limit N] [--no-semantic] [--raw]   --raw: show unfiltered semantic scores
       --import <image-file>...           add images as if copied (source "cli")
+      --add-text <text>...               add text items as if copied (source "cli")
       --copy <id>                        put an item back on the pasteboard
       --run-jobs                         run pending OCR / embedding jobs until done
       --reindex  (--dry-run | --only <item-id> | --all)
       --gc       (--dry-run | --only <blob-hash> | --all)
-      --model list | recommend | install <id> | activate <id> | deactivate | remove <id>
+      --model list | recommend | install <id> | activate <id> | deactivate [image|text] | remove <id>
       --model purge-inactive (--dry-run | --only <model-id> | --all)
       --bench [--items N] [--images N] [--dim N]   synthetic benchmark in a temporary home
       --export-logs <dir>
@@ -116,12 +117,13 @@ enum CLI {
             return 0
 
         case "--search":
-            let pos = try check(rest, allowed: ["--no-semantic"], valued: ["--limit", "--kind"], positional: -1)
+            let pos = try check(rest, allowed: ["--no-semantic", "--raw"], valued: ["--limit", "--kind"], positional: -1)
             guard !pos.isEmpty else { throw CLIError.usage("--search needs a query") }
             let rt = try await openRuntime()
             let r = await rt.service.search(SearchRequest(requestID: 1, text: pos.joined(separator: " "), kind: try kind(rest),
                                                           semantic: !rest.contains("--no-semantic"),
-                                                          limit: Int(try option(rest, "--limit") ?? "20") ?? 20))
+                                                          limit: Int(try option(rest, "--limit") ?? "20") ?? 20,
+                                                          rawSemantic: rest.contains("--raw")))
             print(String(format: "# %d hits in %.1fms; semantic: %@%@", r.hits.count, r.elapsedMs, "\(r.semantic)", r.untranslatedCJK ? " (CJK query not translated)" : ""))
             if let e = r.error { print("# error: \(e)") }
             for h in r.hits {
@@ -148,6 +150,17 @@ enum CLI {
                 print("\(f): \(await rt.service.ingest(snap, context: ctx))")
             }
             return failures == 0 ? 0 : 1
+
+        case "--add-text":
+            let texts = try check(rest, positional: -1)
+            guard !texts.isEmpty else { throw CLIError.usage("--add-text needs text") }
+            let rt = try await openRuntime()
+            let ctx = CaptureContext(frontmostBundleID: "cli", frontmostName: "cli import", excludedBundleIDs: [], lastSelfWriteChangeCount: nil)
+            for t in texts {
+                let out = await rt.service.ingest(PasteboardSnapshot(changeCount: -1, types: ["public.utf8-plain-text"], string: t), context: ctx)
+                print("\(out)")
+            }
+            return 0
 
         case "--copy":
             let pos = try check(rest, positional: 1)
@@ -221,18 +234,19 @@ enum CLI {
         switch sub {
         case "list":
             _ = try check(rest)
-            let active = await rt.service.activeModelManifest()?.id
+            let active = Set([await rt.service.activeModelManifest(slot: .image)?.id, await rt.service.activeModelManifest(slot: .text)?.id].compactMap { $0 })
             let counts = try await rt.db.embeddingCounts()
             for m in catalog.models {
                 let installed = ModelPaths.isInstalled(home: rt.home, model: m)
                 let size = m.requiresInstall ? String(format: "%.0f MB", Double(m.downloadBytes) / 1_048_576) : "built-in"
-                print("\(m.id == active ? "*" : " ") \(m.id)\t\(m.displayName)\t\(size)\t\(installed ? "installed" : "not installed")\tvectors=\(counts[m.id] ?? 0)\(m.isSupportedFamily ? "" : "\tUNSUPPORTED FAMILY")")
+                print("\(active.contains(m.id) ? "*" : " ") [\(m.slot.rawValue)] \(m.id)\t\(m.displayName)\t\(size)\t\(installed ? "installed" : "not installed")\tvectors=\(counts[m.id] ?? 0)\(m.isSupportedFamily ? "" : "\tUNSUPPORTED FAMILY")")
             }
             return 0
         case "recommend":
             _ = try check(rest)
-            let rec = await rt.service.recommendedModel()
-            print("\(HardwareProbe.memoryGB) GB RAM → \(rec?.id ?? "none")")
+            for slot in ModelSlot.allCases {
+                print("\(HardwareProbe.memoryGB) GB RAM, \(slot.rawValue) → \(await rt.service.recommendedModel(slot: slot)?.id ?? "none")")
+            }
             return 0
         case "install":
             let pos = try check(rest, positional: 1)
@@ -247,25 +261,26 @@ enum CLI {
             let pos = try check(rest, positional: 1)
             guard let id = pos.first else { throw CLIError.usage("activate needs a model id") }
             try await rt.service.activateModel(id: id)
-            let cov = try await rt.db.semanticCoverage(modelID: id)
+            let cov = try await rt.service.coverage(modelID: id)
             print("active: \(id); indexed \(cov.indexed)/\(cov.images), queued \(cov.pending)")
             return 0
         case "deactivate":
-            _ = try check(rest)
-            try await rt.service.deactivateModel()
-            print("semantic search disabled")
+            let pos = try check(rest, positional: 1)
+            guard let slot = ModelSlot(rawValue: pos.first ?? "image") else { throw CLIError.usage("slot must be image or text") }
+            try await rt.service.deactivateModel(slot: slot)
+            print("\(slot.rawValue) semantic search disabled")
             return 0
         case "remove":
             let pos = try check(rest, positional: 1)
             guard let id = pos.first else { throw CLIError.usage("remove needs a model id") }
-            if await rt.service.activeModelManifest()?.id == id { throw CLIError.usage("\(id) is active; deactivate or activate another first") }
+            if await rt.service.activeModelManifest(slot: catalog.model(id: id)?.slot ?? .image)?.id == id { throw CLIError.usage("\(id) is active; deactivate or activate another first") }
             try await ModelInstaller(home: rt.home).remove(id)
             print("removed files of \(id) (vectors kept; see --model purge-inactive)")
             return 0
         case "purge-inactive":
             let scope = try MaintenanceScope.parse(rest)
             let r = try await Maintenance.purgeInactive(rt, scope: scope)
-            print("active: \(r.active ?? "none")")
+            print("active: \(r.active.isEmpty ? "none" : r.active.joined(separator: ", "))")
             for (m, n) in r.byModel.sorted(by: { $0.key < $1.key }) { print("  \(m): \(n) vectors") }
             print(scope == .dryRun ? "dry run: nothing deleted" : "deleted: \(r.deleted)")
             return 0

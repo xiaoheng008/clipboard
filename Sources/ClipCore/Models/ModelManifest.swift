@@ -1,6 +1,6 @@
 import Foundation
 
-// Contract: BuiltinModels.json ↔ these Codable types ↔ docs/scv/2-data-contracts.md「模型清单」.
+// Contract: BuiltinModels.json ↔ these Codable types ↔ docs/scv/2.2-data-contracts.md「模型清单」.
 // New optional fields only; unknown families are kept but cannot be activated.
 
 public struct ModelFile: Codable, Sendable, Equatable {
@@ -28,6 +28,20 @@ public struct ModelManifest: Codable, Sendable, Equatable, Identifiable {
     public var tokenizer: String?
     public var files: [ModelFile]
     public var notes: String?
+    // Optional fields (added 2026-10-17 for multilingual families; absent = family default).
+    public var textLength: Int?          // fixed text context (SigLIP2: 64)
+    public var padID: Int?
+    public var lowercase: Bool?
+    public var imageMean: [Float]?
+    public var imageStd: [Float]?
+    public var inputLengths: [Int]?      // enumerated Core ML input lengths (e5: 16…512)
+    public var attentionMaskInput: String?
+    public var queryPrefix: String?
+    public var documentPrefix: String?
+    public var tokenizerFile: String?    // HF tokenizer.json (otherwise CLIP vocab.json + merges.txt)
+    public var multilingual: Bool?
+    public var scoreFloor: Float?        // H5: semantic hits below this are dropped
+    public var scoreMargin: Float?       // H5: …and those further than this below the best hit
 
     public init(id: String, family: String, displayName: String, tier: Int, dim: Int, imageSize: Int?, contextLength: Int?,
                 minMemoryGB: Int, imageInput: String?, textInput: String?, output: String?, tokenizer: String?,
@@ -38,11 +52,17 @@ public struct ModelManifest: Codable, Sendable, Equatable, Identifiable {
         self.files = files; self.notes = notes
     }
 
-    public static let supportedFamilies: Set<String> = ["coreml-clip", "vision-featureprint"]
+    public static let supportedFamilies: Set<String> = ["coreml-clip", "coreml-siglip", "vision-featureprint", "coreml-text-embed"]
     public var isSupportedFamily: Bool { Self.supportedFamilies.contains(family) }
     /// Needs a download before it can be activated.
     public var requiresInstall: Bool { !files.isEmpty }
-    public var supportsTextQueries: Bool { family == "coreml-clip" }
+    /// Can answer a text query (image models: text→image; text models: text→text).
+    public var supportsTextQueries: Bool { ["coreml-clip", "coreml-siglip", "coreml-text-embed"].contains(family) }
+    /// Which active-model slot this model occupies.
+    public var slot: ModelSlot { family == "coreml-text-embed" ? .text : .image }
+    public var isMultilingual: Bool { multilingual ?? false }
+    public var floor: Float { scoreFloor ?? 0.10 }
+    public var margin: Float { scoreMargin ?? 0.06 }
     public var downloadBytes: Int64 { files.reduce(0) { $0 + $1.size } }
 }
 
@@ -73,11 +93,16 @@ public struct ModelCatalog: Codable, Sendable, Equatable {
 
     public func model(id: String) -> ModelManifest? { models.first { $0.id == id } }
 
-    /// H8: the most capable text-capable model whose memory floor fits this machine.
-    public func recommended(memoryGB: Int) -> ModelManifest? {
-        models.filter { $0.supportsTextQueries && $0.minMemoryGB <= memoryGB }
+    /// H8: the most capable text-queryable model for `slot` whose memory floor fits this machine.
+    public func recommended(memoryGB: Int, slot: ModelSlot = .image) -> ModelManifest? {
+        models.filter { $0.slot == slot && $0.supportsTextQueries && $0.isSupportedFamily && $0.minMemoryGB <= memoryGB }
             .max { ($0.tier, -$0.minMemoryGB) < ($1.tier, -$1.minMemoryGB) }
     }
+}
+
+/// Two independent active models: one for images, one for text semantics (FR20).
+public enum ModelSlot: String, Sendable, CaseIterable, Codable {
+    case image, text
 }
 
 /// Install layout written by ModelInstaller. Directory without install.json = not installed.

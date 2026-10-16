@@ -80,22 +80,23 @@ public enum Diagnostics {
             add("jobs.leases", expired > 0 ? .warn : .pass, "expired running leases: \(expired)" + (expired > 0 ? " (will be reclaimed)" : ""))
         } catch { add("storage", .fail, String(describing: error)) }
 
-        let active = await rt.service.activeModelManifest()
-        if let err = await rt.service.activationError {
-            add("model.active", .fail, err)
-        } else if let m = active {
-            add("model.active", .pass, "\(m.id) — \(m.displayName)")
-            if let cov = try? await rt.db.semanticCoverage(modelID: m.id) {
-                let s: CheckStatus = cov.failed > 0 ? .warn : .pass
-                add("model.coverage", s, "indexed \(cov.indexed)/\(cov.images) images, pending \(cov.pending), failed \(cov.failed)")
+        if let err = await rt.service.activationError { add("model.restore", .fail, err) }
+        for slot in ModelSlot.allCases {
+            let name = "model.\(slot.rawValue)"
+            if let m = await rt.service.activeModelManifest(slot: slot) {
+                add(name, .pass, "\(m.id) — \(m.displayName)")
+                if let cov = try? await rt.service.coverage(modelID: m.id) {
+                    add(name + ".coverage", cov.failed > 0 ? .warn : .pass, "indexed \(cov.indexed)/\(cov.images), pending \(cov.pending), failed \(cov.failed)")
+                    let engine = slot == .image ? rt.engine : rt.textEngine
+                    if let idx = await engine.activeIndex {
+                        let mem = await idx.count()
+                        add(name + ".index", mem == cov.indexed ? .pass : .fail, "in-memory vectors \(mem) / stored \(cov.indexed)")
+                    }
+                }
+            } else {
+                let rec = await rt.service.recommendedModel(slot: slot)
+                add(name, .warn, "none → \(slot == .image ? "image" : "text") semantic search disabled" + (rec.map { "; recommended: \($0.id)" } ?? ""))
             }
-            if let idx = await rt.engine.activeIndex, let dbCount = try? await rt.db.semanticCoverage(modelID: m.id).indexed {
-                let mem = await idx.count()
-                add("invariant.index", mem == dbCount ? .pass : .fail, "in-memory vectors \(mem) / stored \(dbCount)")
-            }
-        } else {
-            let rec = await rt.service.recommendedModel()
-            add("model.active", .warn, "none → semantic image search disabled" + (rec.map { "; recommended: \($0.id)" } ?? ""))
         }
         let installed = rt.service.catalog.models.filter { $0.requiresInstall && ModelPaths.isInstalled(home: rt.home, model: $0) }.map(\.id)
         add("models.installed", .pass, installed.isEmpty ? "none" : installed.joined(separator: ", "))

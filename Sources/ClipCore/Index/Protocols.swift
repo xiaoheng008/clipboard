@@ -1,6 +1,6 @@
 import Foundation
 
-// Extension boundary (3-api-design.md). Contract: signature changes must update every implementation
+// Extension boundary (3.2-api-design.md). Contract: signature changes must update every implementation
 // and ProviderRegistry in ClipPlatform.
 
 public struct EmbeddingCapabilities: Sendable, Equatable {
@@ -31,7 +31,14 @@ public protocol EmbeddingProvider: Sendable {
     var dimension: Int { get }
     var capabilities: EmbeddingCapabilities { get }
     func embed(imageAt url: URL) async throws -> [Float]
+    /// A search query.
     func embed(text: String) async throws -> [Float]
+    /// A stored document (text models may use a different prefix, e.g. e5 "passage: ").
+    func embed(document: String) async throws -> [Float]
+}
+
+extension EmbeddingProvider {
+    public func embed(document: String) async throws -> [Float] { try await embed(text: document) }
 }
 
 public struct OCRResult: Sendable, Equatable {

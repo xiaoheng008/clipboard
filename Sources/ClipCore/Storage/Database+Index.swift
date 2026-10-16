@@ -41,14 +41,20 @@ extension Database {
     /// Only vision jobs and embed jobs for `activeModel` are eligible; others wait for their model (C32:
     /// `--model purge-inactive` is their exit).
     public func claimJobs(limit: Int, activeModel: String?, leaseMs: Int64) throws -> [IndexJob] {
+        try claimJobs(limit: limit, activeModels: activeModel.map { [$0] } ?? [], leaseMs: leaseMs)
+    }
+
+    /// FR20: embed jobs of every active model (image slot and text slot) are eligible.
+    public func claimJobs(limit: Int, activeModels: [String], leaseMs: Int64) throws -> [IndexJob] {
         let t = now()
+        let models = activeModels.isEmpty ? ["\u{0}"] : activeModels
         return try conn.transaction {
             let jobs = try conn.query("""
                 SELECT id, item_id, kind, model_id, attempts FROM index_jobs
                 WHERE ((state = 'pending' AND not_before <= ?) OR (state = 'running' AND lease_until < ?))
-                  AND (kind = 'vision' OR model_id = ?)
+                  AND (kind = 'vision' OR model_id IN (\(models.map { _ in "?" }.joined(separator: ","))))
                 ORDER BY id LIMIT ?
-                """, [t, t, activeModel ?? "\u{0}", limit]) {
+                """, [t, t] + models + [limit]) {
                 IndexJob(id: $0.int(0), itemID: $0.int(1), kind: $0.text(2) ?? "", modelID: $0.text(3) ?? "", attempts: Int($0.int(4)))
             }
             for j in jobs {
@@ -56,6 +62,11 @@ extension Database {
             }
             return jobs
         }
+    }
+
+    /// Text used for a document embedding (bounded; H10).
+    public func embedText(itemID: Int64, maxChars: Int = 4000) throws -> String? {
+        try conn.query("SELECT substr(text, 1, ?) FROM items WHERE id = ?", [maxChars, itemID]) { $0.text(0) }.first ?? nil
     }
 
     public func blobHash(itemID: Int64) throws -> String? {
@@ -102,14 +113,15 @@ extension Database {
     }
 
     /// Backfill on model activation: one transaction per batch; UNIQUE makes re-runs idempotent.
-    public func enqueueMissingEmbeddings(modelID: String, batchSize: Int = 1000) throws -> Int {
+    public func enqueueMissingEmbeddings(modelID: String, kinds: [ItemKind] = [.image], batchSize: Int = 1000) throws -> Int {
         var total = 0
+        let kindList = kinds.map { "'\($0.rawValue)'" }.joined(separator: ",")
         while true {
             let n = try conn.transaction {
                 try conn.run("""
                     INSERT INTO index_jobs(item_id, kind, model_id, state)
                     SELECT i.id, 'embed', ?, 'pending' FROM items i
-                    WHERE i.kind = 'image'
+                    WHERE i.kind IN (\(kindList))
                       AND NOT EXISTS (SELECT 1 FROM embeddings e WHERE e.item_id = i.id AND e.model_id = ?)
                       AND NOT EXISTS (SELECT 1 FROM index_jobs j WHERE j.item_id = i.id AND j.kind = 'embed' AND j.model_id = ?)
                     LIMIT ?
@@ -120,10 +132,12 @@ extension Database {
         }
     }
 
-    public func semanticCoverage(modelID: String) throws -> SemanticCoverage {
-        SemanticCoverage(
+    /// `images` counts the items this model covers (kinds), not only images.
+    public func semanticCoverage(modelID: String, kinds: [ItemKind] = [.image]) throws -> SemanticCoverage {
+        let kindList = kinds.map { "'\($0.rawValue)'" }.joined(separator: ",")
+        return SemanticCoverage(
             indexed: Int(try conn.scalarInt("SELECT count(*) FROM embeddings WHERE model_id = ?", [modelID])),
-            images: Int(try conn.scalarInt("SELECT count(*) FROM items WHERE kind = 'image'")),
+            images: Int(try conn.scalarInt("SELECT count(*) FROM items WHERE kind IN (\(kindList))")),
             pending: Int(try conn.scalarInt("SELECT count(*) FROM index_jobs WHERE kind = 'embed' AND model_id = ? AND state != 'failed'", [modelID])),
             failed: Int(try conn.scalarInt("SELECT count(*) FROM index_jobs WHERE kind = 'embed' AND model_id = ? AND state = 'failed'", [modelID])))
     }

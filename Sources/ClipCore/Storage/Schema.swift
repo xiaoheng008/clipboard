@@ -1,6 +1,6 @@
 import Foundation
 
-// Contract: this schema and docs/scv/2-data-contracts.md must change together.
+// Contract: this schema and docs/scv/2.2-data-contracts.md must change together.
 // The version lives in `PRAGMA user_version`; migrations are forward-only (C5).
 
 public enum SchemaError: Error, CustomStringConvertible {

@@ -1,0 +1,4 @@
+✔ Suite XLMRTokenizerTests passed after 1.412 seconds.
+✔ Suite GemmaTokenizerTests passed after 1.412 seconds.
+✔ Suite CLIPTokenizerTests passed after 1.510 seconds.
+✔ Test run with 5 tests in 3 suites passed after 1.510 seconds.

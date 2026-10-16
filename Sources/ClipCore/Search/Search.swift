@@ -73,7 +73,7 @@ public enum QueryPlanner {
     }
 }
 
-/// Pure: reciprocal-rank fusion of text and semantic hits (3-api-design.md).
+/// Pure: reciprocal-rank fusion of text and semantic hits (3.2-api-design.md).
 public enum RankFusion {
     public static let k = 60.0
 
@@ -112,4 +112,13 @@ public struct LatestOnly: Sendable {
     public func accepts(_ id: UInt64) -> Bool { id == current }
     /// e.g. panel closed: every in-flight response is now stale.
     public mutating func invalidate() { current &+= 1 }
+}
+
+/// H5 (revised): relative semantic judgement. Scores drift per query, so a fixed cut-off drops correct
+/// answers; keep hits close to the best one, above a per-model floor. Pure for tests and calibration.
+public enum SemanticFilter {
+    public static func apply(_ hits: [SemanticScore], floor: Float, margin: Float) -> [SemanticScore] {
+        guard let best = hits.map(\.score).max(), best >= floor else { return [] }
+        return hits.filter { $0.score >= floor && $0.score >= best - margin }
+    }
 }

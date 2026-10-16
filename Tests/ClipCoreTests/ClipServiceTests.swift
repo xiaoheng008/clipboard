@@ -137,3 +137,50 @@ final class FakeWriter: PasteboardWriting, @unchecked Sendable {
         #expect(await rt2.engine.activeIndex?.count() == 1)
     }
 }
+
+@Suite struct TwoSlotTests {
+    var ctx: CaptureContext { CaptureContext(frontmostBundleID: nil, frontmostName: nil, excludedBundleIDs: [], lastSelfWriteChangeCount: nil) }
+    func image(_ seed: UInt8) -> PasteboardSnapshot {
+        PasteboardSnapshot(changeCount: 1, types: ["public.png"], image: CapturedImage(data: pngBytes(seed: seed), uti: "public.png", width: 1, height: 1))
+    }
+    var services: PlatformServices {
+        PlatformServices(ocr: FakeOCR(), translator: NoTranslator(), pasteboard: FakeWriter(),
+                         makeProvider: { m in var e = FakeEmbedder(); e.modelID = m.id; e.dimension = m.dim; return e }, memoryGB: { 16 })
+    }
+
+    // AC19.4 — image and text models are independent slots; both restore after restart (I5).
+    @Test func imageAndTextModelsCoexist() async throws {
+        let home = try makeTempHome()
+        do {
+            let rt = try await Runtime.open(home: home, services: services, startWorker: false)
+            try await rt.service.activateModel(id: "siglip2-base@1", requireInstalled: false)
+            try await rt.service.activateModel(id: "multilingual-e5-small@1", requireInstalled: false)
+            _ = await rt.service.ingest(image(1), context: ctx)
+            _ = await rt.service.ingest(textSnapshot("明天下午三点开会"), context: ctx)
+            _ = await rt.service.ingest(textSnapshot("https://example.com"), context: ctx)   // url: not text-embedded
+            let report = await rt.worker.drain()
+            #expect(report.completed == 3 && report.failed == 0)   // vision + image embed + text embed
+            #expect(try await rt.db.semanticCoverage(modelID: "siglip2-base@1").indexed == 1)
+            #expect(try await rt.db.semanticCoverage(modelID: "multilingual-e5-small@1", kinds: [.text, .rich]) == SemanticCoverage(indexed: 1, images: 1, pending: 0, failed: 0))
+            let r = await rt.service.search(SearchRequest(requestID: 1, text: "meeting", kind: .all, semantic: true, limit: 20))
+            #expect(r.hits.count == 2)                     // fake vectors: image + text both match semantically
+            #expect(r.hits.allSatisfy { $0.sources == [.semantic] })
+            let textOnly = await rt.service.search(SearchRequest(requestID: 2, text: "meeting", kind: .text, semantic: true, limit: 20))
+            #expect(textOnly.hits.count == 1)
+            try await rt.service.deactivateModel(slot: .image)
+            #expect(await rt.service.activeModelManifest(slot: .text)?.id == "multilingual-e5-small@1")
+            try await rt.service.activateModel(id: "siglip2-base@1", requireInstalled: false)
+        }
+        let rt2 = try await Runtime.open(home: home, services: services, startWorker: false, requireInstalledModel: false)
+        #expect(await rt2.engine.activeModelID == "siglip2-base@1")
+        #expect(await rt2.textEngine.activeModelID == "multilingual-e5-small@1")
+        #expect(await rt2.textEngine.activeIndex?.count() == 1)
+    }
+
+    @Test func recommendationPerSlot() throws {
+        let c = try ModelCatalog.builtin()
+        #expect(c.recommended(memoryGB: 32, slot: .image)?.id == "siglip2-base@1")
+        #expect(c.recommended(memoryGB: 4, slot: .image)?.id == "mobileclip-s0@1")
+        #expect(c.recommended(memoryGB: 32, slot: .text)?.id == "multilingual-e5-small@1")
+    }
+}

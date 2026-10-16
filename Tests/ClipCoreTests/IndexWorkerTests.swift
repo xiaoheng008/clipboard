@@ -16,8 +16,8 @@ struct FakeEmbedder: EmbeddingProvider {
     var modelID = "fake@1"
     var dimension = 4
     var capabilities = EmbeddingCapabilities(image: true, text: true)
-    func embed(imageAt url: URL) async throws -> [Float] { VectorCodec.normalized([1, 2, 3, 4]) }
-    func embed(text: String) async throws -> [Float] { VectorCodec.normalized([1, 2, 3, 4]) }
+    func embed(imageAt url: URL) async throws -> [Float] { VectorCodec.normalized((0..<dimension).map { Float($0 % 4 + 1) }) }
+    func embed(text: String) async throws -> [Float] { VectorCodec.normalized((0..<dimension).map { Float($0 % 4 + 1) }) }
 }
 
 final class Counter: @unchecked Sendable {

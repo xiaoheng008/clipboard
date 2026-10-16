@@ -199,6 +199,135 @@ enum BuiltinModels {
    "notes": "Apple MobileCLIP (apple-ascl license). English text encoder."
   },
   {
+   "id": "siglip2-base@1",
+   "family": "coreml-siglip",
+   "displayName": "SigLIP2 Base（中英文搜图）",
+   "tier": 4,
+   "dim": 768,
+   "imageSize": 256,
+   "minMemoryGB": 8,
+   "imageInput": "pixel_values",
+   "textInput": "input_ids",
+   "output": "image_embeds",
+   "textLength": 64,
+   "padID": 0,
+   "lowercase": true,
+   "imageMean": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "imageStd": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "tokenizer": "hf",
+   "tokenizerFile": "tokenizer.json",
+   "multilingual": true,
+   "scoreFloor": 0.09,
+   "scoreMargin": 0.03,
+   "files": [
+    {
+     "path": "image.mlpackage/Manifest.json",
+     "url": "https://huggingface.co/FluidInference/siglip2-base-patch16-256-coreml/resolve/main/siglip2-base-patch16-256-image-fp16.mlpackage/Manifest.json",
+     "sha256": "964a40aa63c2d201a30f0aeab68aef8abc95c854a34f4cae533051cd99996e72",
+     "size": 617
+    },
+    {
+     "path": "image.mlpackage/Data/com.apple.CoreML/model.mlmodel",
+     "url": "https://huggingface.co/FluidInference/siglip2-base-patch16-256-coreml/resolve/main/siglip2-base-patch16-256-image-fp16.mlpackage/Data/com.apple.CoreML/model.mlmodel",
+     "sha256": "702fdc0b557984e16e4bbcce4eec3568f08a7459bd3c27c770a487823bda808b",
+     "size": 140042
+    },
+    {
+     "path": "image.mlpackage/Data/com.apple.CoreML/weights/weight.bin",
+     "url": "https://huggingface.co/FluidInference/siglip2-base-patch16-256-coreml/resolve/main/siglip2-base-patch16-256-image-fp16.mlpackage/Data/com.apple.CoreML/weights/weight.bin",
+     "sha256": "da086438b60ada3566f8c91bd8a632462f28d344186e7f60cb5abd223d2e99a8",
+     "size": 184692800
+    },
+    {
+     "path": "text.mlpackage/Manifest.json",
+     "url": "https://huggingface.co/FluidInference/siglip2-base-patch16-256-coreml/resolve/main/siglip2-base-patch16-256-text-fp16.mlpackage/Manifest.json",
+     "sha256": "a5dfacf23259261d32c5af26c5cfe4c41a44f0584739b2ef10e70c7f11c2a620",
+     "size": 617
+    },
+    {
+     "path": "text.mlpackage/Data/com.apple.CoreML/model.mlmodel",
+     "url": "https://huggingface.co/FluidInference/siglip2-base-patch16-256-coreml/resolve/main/siglip2-base-patch16-256-text-fp16.mlpackage/Data/com.apple.CoreML/model.mlmodel",
+     "sha256": "69fce0f538fbe78c45b953e1cc396fb912d701c6f985ac825bdec92833aca452",
+     "size": 128779
+    },
+    {
+     "path": "text.mlpackage/Data/com.apple.CoreML/weights/weight.bin",
+     "url": "https://huggingface.co/FluidInference/siglip2-base-patch16-256-coreml/resolve/main/siglip2-base-patch16-256-text-fp16.mlpackage/Data/com.apple.CoreML/weights/weight.bin",
+     "sha256": "9a52dd8222973b6b4cdf55983689bb2fa18a27fcd20b83f8d8fb89de544530b5",
+     "size": 564620224
+    },
+    {
+     "path": "tokenizer.json",
+     "url": "https://huggingface.co/FluidInference/siglip2-base-patch16-256-coreml/resolve/main/tokenizer.json",
+     "sha256": "caefd63119539a63be2d55ef3e05023fbb793948c4bda5bc0c366b42a382f903",
+     "size": 34363038
+    }
+   ],
+   "notes": "Google SigLIP 2 (Apache-2.0), Core ML conversion by Fluid Inference. Text output: text_embeds."
+  },
+  {
+   "id": "multilingual-e5-small@1",
+   "family": "coreml-text-embed",
+   "displayName": "Multilingual E5 Small（中英文文本语义）",
+   "tier": 1,
+   "dim": 384,
+   "minMemoryGB": 0,
+   "textInput": "input_ids",
+   "attentionMaskInput": "attention_mask",
+   "output": "embedding",
+   "inputLengths": [
+    16,
+    32,
+    64,
+    128,
+    256,
+    512
+   ],
+   "padID": 1,
+   "queryPrefix": "query: ",
+   "documentPrefix": "passage: ",
+   "tokenizer": "hf",
+   "tokenizerFile": "tokenizer.json",
+   "multilingual": true,
+   "scoreFloor": 0.84,
+   "scoreMargin": 0.012,
+   "files": [
+    {
+     "path": "text.mlpackage/Manifest.json",
+     "url": "https://huggingface.co/wolfram-pro/multilingual-e5-small-coreml/resolve/main/MultilingualE5Small.mlpackage/Manifest.json",
+     "sha256": "f33ab12817d30783d36fb9eb1f3ebf4483ca088caf7f0ea13fff54222b71ae16",
+     "size": 617
+    },
+    {
+     "path": "text.mlpackage/Data/com.apple.CoreML/model.mlmodel",
+     "url": "https://huggingface.co/wolfram-pro/multilingual-e5-small-coreml/resolve/main/MultilingualE5Small.mlpackage/Data/com.apple.CoreML/model.mlmodel",
+     "sha256": "121f9988a394565994f5aa26cd8a86a7d32b76e0e5b986ecee07070e5b2f8b27",
+     "size": 283336
+    },
+    {
+     "path": "text.mlpackage/Data/com.apple.CoreML/weights/weight.bin",
+     "url": "https://huggingface.co/wolfram-pro/multilingual-e5-small-coreml/resolve/main/MultilingualE5Small.mlpackage/Data/com.apple.CoreML/weights/weight.bin",
+     "sha256": "ff0331d7b3e44efd122d3592caf82a09e1d88a0bbd458fc8a24223ebb14a3ba7",
+     "size": 235028736
+    },
+    {
+     "path": "tokenizer.json",
+     "url": "https://huggingface.co/wolfram-pro/multilingual-e5-small-coreml/resolve/main/tokenizer.json",
+     "sha256": "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39",
+     "size": 17082730
+    }
+   ],
+   "notes": "intfloat/multilingual-e5-small (MIT), Core ML conversion by wolfram-pro. Pooling + L2 norm inside the graph."
+  },
+  {
    "id": "vision-featureprint@1",
    "family": "vision-featureprint",
    "displayName": "Apple Vision 特征（以图搜图，无需下载）",

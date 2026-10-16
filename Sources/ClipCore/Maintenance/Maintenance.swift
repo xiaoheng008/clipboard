@@ -50,7 +50,7 @@ public struct VerifyReport: Sendable {
 
 public struct GCReport: Sendable { public var orphans: [String] = []; public var deleted: [String] = [] }
 public struct ReindexReport: Sendable { public var failedToReset = 0; public var missingOCR = 0; public var missingEmbeddings = 0; public var changed = 0 }
-public struct PurgeReport: Sendable { public var active: String?; public var byModel: [String: Int] = [:]; public var deleted = 0 }
+public struct PurgeReport: Sendable { public var active: [String] = []; public var byModel: [String: Int] = [:]; public var deleted = 0 }
 
 /// Read-only verification and the three write tools. All writes go through Database transactions.
 public enum Maintenance {
@@ -84,7 +84,8 @@ public enum Maintenance {
 
     public static func reindex(_ rt: Runtime, scope: MaintenanceScope) async throws -> ReindexReport {
         var r = ReindexReport()
-        let active = await rt.service.activeModelManifest()?.id
+        let active = await rt.service.activeModelManifest(slot: .image)?.id
+        let activeText = await rt.service.activeModelManifest(slot: .text)?.id
         r.failedToReset = try await rt.db.failedJobs()
         r.missingOCR = try await rt.db.imagesMissingOCR()
         if let active { r.missingEmbeddings = try await rt.db.imagesMissingEmbedding(modelID: active) }
@@ -98,6 +99,7 @@ public enum Maintenance {
             r.changed += try await rt.db.resetFailedJobs()
             r.changed += try await rt.db.enqueueMissingVision()
             if let active { r.changed += try await rt.db.enqueueMissingEmbeddings(modelID: active) }
+            if let activeText { r.changed += try await rt.db.enqueueMissingEmbeddings(modelID: activeText, kinds: ClipService.textEmbeddedKinds) }
         }
         if r.changed > 0 { await rt.worker.wake() }
         Log.shared.event("maint.reindex", ["changed": .int(Int64(r.changed))])
@@ -107,12 +109,13 @@ public enum Maintenance {
     /// Q5: vectors of non-active models are kept until purged here.
     public static func purgeInactive(_ rt: Runtime, scope: MaintenanceScope) async throws -> PurgeReport {
         var r = PurgeReport()
-        r.active = await rt.service.activeModelManifest()?.id
-        r.byModel = try await rt.db.embeddingCounts().filter { $0.key != r.active }
+        // Both slots' active models are protected (FR20).
+        r.active = [await rt.service.activeModelManifest(slot: .image)?.id, await rt.service.activeModelManifest(slot: .text)?.id].compactMap { $0 }
+        r.byModel = try await rt.db.embeddingCounts().filter { !r.active.contains($0.key) }
         switch scope {
         case .dryRun: break
         case .only(let m):
-            guard m != r.active else { throw CLIError.usage("\(m) is the active model") }
+            guard !r.active.contains(m) else { throw CLIError.usage("\(m) is an active model") }
             guard r.byModel[m] != nil else { throw CLIError.usage("no vectors for \(m)") }
             r.deleted = try await rt.db.purgeModel(m)
         case .all:
