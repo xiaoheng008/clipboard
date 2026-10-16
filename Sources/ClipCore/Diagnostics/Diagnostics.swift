@@ -15,11 +15,12 @@ public struct PlatformProbes: Sendable {
     public var hotkey: String?                  // "unset" / "⌘⇧V registered" / "failed …"
     public var watcherHeartbeatAgeSeconds: Double?
     public var hardware: String?
+    public var loginItem: String?
     public static let unavailable = PlatformProbes()
     public init(pasteboardAccess: String? = nil, translation: String? = nil, hotkey: String? = nil,
-                watcherHeartbeatAgeSeconds: Double? = nil, hardware: String? = nil) {
+                watcherHeartbeatAgeSeconds: Double? = nil, loginItem: String? = nil, hardware: String? = nil) {
         self.pasteboardAccess = pasteboardAccess; self.translation = translation; self.hotkey = hotkey
-        self.watcherHeartbeatAgeSeconds = watcherHeartbeatAgeSeconds; self.hardware = hardware
+        self.watcherHeartbeatAgeSeconds = watcherHeartbeatAgeSeconds; self.loginItem = loginItem; self.hardware = hardware
     }
 }
 
@@ -105,6 +106,9 @@ public enum Diagnostics {
         add("translation.zh-en", probes.translation == nil ? .skip : (probes.translation == "installed" ? .pass : .warn),
             probes.translation ?? "not probed")
         add("hotkey", probes.hotkey == nil ? .skip : (probes.hotkey!.hasPrefix("failed") ? .fail : .pass), probes.hotkey ?? "app not running in this process")
+        if let li = probes.loginItem {
+            add("login_item", li == "requiresApproval" ? .warn : .pass, li)
+        }
         add("logs", .pass, Log.shared.currentFile?.path ?? "not configured")
         return DiagnosticReport(checks: out)
     }

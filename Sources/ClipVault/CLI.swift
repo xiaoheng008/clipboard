@@ -22,6 +22,7 @@ enum CLI {
       --model list | recommend | install <id> | activate <id> | deactivate [image|text] | remove <id>
       --model purge-inactive (--dry-run | --only <model-id> | --all)
       --bench [--items N] [--images N] [--dim N]   synthetic benchmark in a temporary home
+      --login-item status | on | off     launch at login (off by default)
       --export-logs <dir>
       --version | --help
 
@@ -48,7 +49,7 @@ enum CLI {
 
     static func probes() async -> PlatformProbes {
         PlatformProbes(pasteboardAccess: PasteboardAccess.current().rawValue, translation: await AppleTranslator.availability(),
-                       hotkey: nil, watcherHeartbeatAgeSeconds: nil,
+                       hotkey: nil, watcherHeartbeatAgeSeconds: nil, loginItem: LoginItem.state.rawValue,
                        hardware: "\(HardwareProbe.cpuBrand), \(HardwareProbe.memoryGB) GB, \(HardwareProbe.osVersion)")
     }
 
@@ -213,6 +214,17 @@ enum CLI {
             try? FileManager.default.removeItem(at: root)
             print(r.budgetsMet ? "ALL BUDGETS MET" : "SOME BUDGETS MISSED")
             return r.budgetsMet ? 0 : 1
+
+        case "--login-item":
+            let pos = try check(rest, positional: 1)
+            switch pos.first ?? "status" {
+            case "status": break
+            case "on": try LoginItem.set(true)
+            case "off": try LoginItem.set(false)
+            default: throw CLIError.usage("--login-item takes status, on or off")
+            }
+            print("login item: \(LoginItem.state.rawValue)")
+            return 0
 
         case "--export-logs":
             let pos = try check(rest, positional: 1)

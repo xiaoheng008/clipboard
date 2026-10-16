@@ -20,6 +20,8 @@ final class SettingsModel {
     var diagnostics = ""
     var diagnosing = false
     var purgeInfo: String?
+    var launchAtLogin = LoginItem.state == .enabled
+    var loginItemStatus = LoginItem.displayName
     var newExcluded = ""
     var confirmClear = false
     var confirmPurge = false
@@ -66,6 +68,12 @@ final class SettingsModel {
         _ = onHotkeyChanged?(nil)
         hotkeyError = nil
         Task { try? await rt.db.setSetting(SettingKey.hotkey, HotKeyCombo.clearedSetting); await reload() }
+    }
+
+    func setLaunchAtLogin(_ on: Bool) {
+        do { try LoginItem.set(on) } catch { hotkeyError = nil; loginItemStatus = "设置失败：\(error.localizedDescription)" ; launchAtLogin = LoginItem.state == .enabled; return }
+        launchAtLogin = LoginItem.state == .enabled
+        loginItemStatus = LoginItem.displayName
     }
 
     // MARK: Excluded apps
@@ -186,6 +194,10 @@ struct GeneralTab: View {
                 }
                 if let e = model.hotkeyError { Text(e).foregroundStyle(.red).font(.caption) }
                 Text("默认 ⌥空格；清除后可点击菜单栏图标打开面板。").font(.caption).foregroundStyle(.secondary)
+            }
+            Section("启动") {
+                Toggle("登录时启动 ClipVault", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
+                Text(model.loginItemStatus).font(.caption).foregroundStyle(.secondary)
             }
             Section("不记录这些 App 的复制（Bundle ID）") {
                 ForEach(model.excluded, id: \.self) { id in

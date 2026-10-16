@@ -214,6 +214,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                               translation: await AppleTranslator.availability(),
                               hotkey: hk,
                               watcherHeartbeatAgeSeconds: watcher?.lastPoll.map { Date().timeIntervalSince($0) },
+                              loginItem: LoginItem.state.rawValue,
                               hardware: "\(HardwareProbe.cpuBrand), \(HardwareProbe.memoryGB) GB, \(HardwareProbe.osVersion)")
     }
 
