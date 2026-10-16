@@ -1,0 +1,6 @@
+# 2026-10-17, packaged dist/ClipVault.app on macOS 27.0.1 (FR17)
+$ ClipVault --login-item on      → login item: enabled   (exit 0)
+$ ClipVault --login-item status  → login item: enabled
+$ ClipVault --login-item off     → login item: disabled
+$ ClipVault --login-item status  → login item: disabled   (restored to off; default stays off)
+Non-bundled debug binary         → login item: notFound
