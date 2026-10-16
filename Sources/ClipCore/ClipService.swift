@@ -75,7 +75,6 @@ public enum SettingKey {
     public static let activeTextModel = "active_text_model"
     public static let hotkey = "hotkey"
     public static let excludedApps = "excluded_apps"
-    public static let semanticThreshold = "semantic_threshold"
 }
 
 /// The business façade. UI and CLI go through here; nothing else mutates storage.

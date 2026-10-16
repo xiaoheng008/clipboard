@@ -120,6 +120,7 @@ import Testing
 // AC17 — cross-cutting structural constraints, enforced by scanning sources.
 @Suite struct StructureTests {
     @Test func sqliteCallsOnlyInWrapper() {
+        #expect(swiftSources(under: "Sources").count > 25)          // R19: the scan must see the sources
         let offenders = swiftSources(under: "Sources").filter { $0.text.contains("sqlite3_") && !$0.path.hasSuffix("Storage/SQLite.swift") }
         #expect(offenders.map(\.path) == [])
     }
@@ -159,5 +160,17 @@ import Testing
         let raw = try rawBytes(home)
         #expect(raw.range(of: Data(secret.utf8)) == nil)
         #expect(raw.range(of: Data("9f8e7d6c5b4a".utf8)) == nil)
+    }
+}
+
+@Suite struct SchemaDocTests {
+    // Contract: the DDL in docs/scv/2.2-data-contracts.md is verbatim Schema.v1.
+    @Test func docDDLMatchesCode() throws {
+        let doc = try String(contentsOf: repoRoot.appendingPathComponent("docs/scv/2.2-data-contracts.md"), encoding: .utf8)
+        let begin = try #require(doc.range(of: "<!-- schema:v1:begin -->\n```sql\n"))
+        let end = try #require(doc.range(of: "\n```\n<!-- schema:v1:end -->"))
+        let documented = String(doc[begin.upperBound..<end.lowerBound])
+        func norm(_ s: String) -> String { s.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: "\n") }
+        #expect(norm(documented) == norm(Schema.v1))
     }
 }

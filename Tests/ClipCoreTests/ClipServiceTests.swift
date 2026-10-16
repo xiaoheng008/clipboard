@@ -55,7 +55,7 @@ final class FakeWriter: PasteboardWriting, @unchecked Sendable {
     // AC3.3 / AC11.1 — copy back writes the pasteboard, touches the item, and the echo is skipped.
     @Test func copyBackIsNotRecapturedAsNewItem() async throws {
         let (rt, writer) = try await makeRuntime()
-        guard case .stored(let id, _) = await rt.service.ingest(textSnapshot("again"), context: ctx) else { return }
+        guard case .stored(let id, _) = await rt.service.ingest(textSnapshot("again"), context: ctx) else { Issue.record("ingest did not store"); return }
         try await rt.service.copyBack(id: id)
         #expect(writer.written.count == 1 && writer.written[0].0 == "again")
         // The watcher then sees the change it caused (changeCount 101) with no marker type.
@@ -76,7 +76,7 @@ final class FakeWriter: PasteboardWriting, @unchecked Sendable {
     @Test func deleteRemovesEverything() async throws {
         let (rt, _) = try await makeRuntime()
         try await rt.service.activateModel(id: "mobileclip-s0@1", requireInstalled: false)
-        guard case .stored(let id, _) = await rt.service.ingest(image(2), context: ctx) else { return }
+        guard case .stored(let id, _) = await rt.service.ingest(image(2), context: ctx) else { Issue.record("ingest did not store"); return }
         _ = await rt.worker.drain()
         let hash = try #require(try await rt.db.blobHash(itemID: id))
         #expect(await rt.engine.activeIndex?.count() == 1)
@@ -101,8 +101,8 @@ final class FakeWriter: PasteboardWriting, @unchecked Sendable {
     @Test func searchFusesTextAndSemantic() async throws {
         let (rt, _) = try await makeRuntime()
         try await rt.service.activateModel(id: "mobileclip-s0@1", requireInstalled: false)
-        guard case .stored(let img, _) = await rt.service.ingest(image(4), context: ctx) else { return }
-        guard case .stored(let txt, _) = await rt.service.ingest(textSnapshot("a cat photo"), context: ctx) else { return }
+        guard case .stored(let img, _) = await rt.service.ingest(image(4), context: ctx) else { Issue.record("ingest did not store"); return }
+        guard case .stored(let txt, _) = await rt.service.ingest(textSnapshot("a cat photo"), context: ctx) else { Issue.record("ingest did not store"); return }
         _ = await rt.worker.drain()
         let r = await rt.service.search(SearchRequest(requestID: 1, text: "cat", kind: .all, semantic: true, limit: 20))
         #expect(Set(r.hits.map(\.id)) == [img, txt])
@@ -197,12 +197,12 @@ final class FakeWriter: PasteboardWriting, @unchecked Sendable {
                                         makeProvider: { m in var e = FakeEmbedder(); e.modelID = m.id; e.dimension = m.dim; return e }, memoryGB: { 16 })
         let rt = try await Runtime.open(home: try makeTempHome(), services: services, startWorker: false)
         // No image model: explicit status, no results.
-        guard case .stored(let a, _) = await rt.service.ingest(image(1), context: ctx) else { return }
+        guard case .stored(let a, _) = await rt.service.ingest(image(1), context: ctx) else { Issue.record("ingest did not store"); return }
         let none = await rt.service.similarImages(to: a, limit: 10)
         #expect(none.semantic == .notEnabled && none.hits.isEmpty)
 
         try await rt.service.activateModel(id: "vision-featureprint@1", requireInstalled: false)
-        guard case .stored(let b, _) = await rt.service.ingest(image(2), context: ctx) else { return }
+        guard case .stored(let b, _) = await rt.service.ingest(image(2), context: ctx) else { Issue.record("ingest did not store"); return }
         _ = await rt.service.ingest(textSnapshot("not an image"), context: ctx)
         _ = await rt.worker.drain()
         let r = await rt.service.similarImages(to: a, limit: 10)

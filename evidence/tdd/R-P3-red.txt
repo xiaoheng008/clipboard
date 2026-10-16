@@ -1,0 +1,4 @@
+Tests/ClipCoreTests/MaintenanceTests.swift failed with a nonzero exit code. Command line:     cd /Users/xiaoheng/Program/app
+Tests/ClipCoreTests/MaintenanceTests.swift:272:20: [1;31merror: [1;39mcannot find 'RowWindow' in scope[0;0m
+Tests/ClipCoreTests/MaintenanceTests.swift:275:22: [1;31merror: [1;39mcannot find 'RowWindow' in scope[0;0m
+Tests/ClipCoreTests/MaintenanceTests.swift:276:85: [1;31merror: [1;39mcannot infer key path type from context; consider explicitly specifying a root

@@ -168,3 +168,22 @@ struct MobileCLIPIntegrationTests {
         #expect(merged.model(id: "..") == nil && merged.model(id: "ok@1") == nil && merged.model(id: "good@1") != nil)
     }
 }
+
+@Suite struct InstallFailureTests {
+    // AC9.4 — a transport failure leaves nothing behind; a later install succeeds.
+    @Test func failedDownloadThenRetry() async throws {
+        let home = try tempHome()
+        let good = home.root.appendingPathComponent("a.bin")
+        try Data("model".utf8).write(to: good)
+        func manifest(_ url: String) throws -> ModelManifest {
+            ModelManifest(id: "tiny@1", family: "coreml-clip", displayName: "tiny", tier: 0, dim: 4, imageSize: nil, contextLength: nil,
+                          minMemoryGB: 0, imageInput: nil, textInput: nil, output: nil, tokenizer: nil,
+                          files: [ModelFile(path: "a.bin", url: url, sha256: try ModelInstaller.sha256(of: good), size: 5)], notes: nil)
+        }
+        await #expect(throws: (any Error).self) { try await ModelInstaller(home: home).install(try manifest("file:///nonexistent/a.bin")) }
+        #expect(try FileManager.default.contentsOfDirectory(atPath: home.tmpURL.path).filter { $0.hasPrefix("model-") }.isEmpty)
+        #expect(!ModelPaths.isInstalled(home: home, model: try manifest(good.absoluteString)))
+        try await ModelInstaller(home: home).install(try manifest(good.absoluteString))
+        #expect(ModelPaths.isInstalled(home: home, model: try manifest(good.absoluteString)))
+    }
+}

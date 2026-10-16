@@ -80,8 +80,7 @@ final class PanelModel {
             let gateID = gate.next()
             let page = (try? await service.page(after: PageCursor(last.item), kind: kind, limit: Self.pageSize)) ?? []
             guard gate.accepts(gateID) else { return }
-            let known = Set(rows.map(\.id))
-            rows += page.filter { !known.contains($0.id) }.map { Row(item: $0, sources: [], similarity: nil) }
+            rows = RowWindow.append(page.map { Row(item: $0, sources: [], similarity: nil) }, to: rows, cap: Self.maxRowsInMemory)
             reachedEnd = page.count < Self.pageSize || rows.count >= Self.maxRowsInMemory
         }
     }
@@ -133,8 +132,7 @@ final class PanelModel {
         Task {
             let page = (try? await service.page(after: PageCursor(last.item), kind: kind, limit: Self.pageSize)) ?? []
             guard gate.accepts(id) else { return }
-            let known = Set(rows.map(\.id))
-            rows += page.filter { !known.contains($0.id) }.map { Row(item: $0, sources: [], similarity: nil) }
+            rows = RowWindow.append(page.map { Row(item: $0, sources: [], similarity: nil) }, to: rows, cap: Self.maxRowsInMemory)
             reachedEnd = page.count < Self.pageSize || rows.count >= Self.maxRowsInMemory
         }
     }
@@ -255,9 +253,7 @@ final class PanelModel {
     private func mergeFirstPage() async {
         let id = gate.next()
         guard let page = try? await service.page(after: nil, kind: kind, limit: Self.pageSize), gate.accepts(id) else { return }
-        let top = Set(page.map(\.id))
-        let merged = page.map { Row(item: $0, sources: [], similarity: nil) } + rows.filter { !top.contains($0.id) }
-        rows = Array(merged.prefix(Self.maxRowsInMemory))
+        rows = RowWindow.mergeTop(page.map { Row(item: $0, sources: [], similarity: nil) }, onto: rows, cap: Self.maxRowsInMemory)
         fixSelection()
     }
 

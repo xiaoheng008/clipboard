@@ -5,10 +5,13 @@ import Foundation
 
 public enum SchemaError: Error, CustomStringConvertible {
     case newerThanApp(found: Int, supported: Int)
+    case incompatible(String)
     public var description: String {
         switch self {
         case let .newerThanApp(found, supported):
             return "Database schema v\(found) is newer than this app supports (v\(supported)). Please upgrade ClipVault."
+        case .incompatible(let s):
+            return "Database is from a pre-release build and is incompatible (\(s)). Move clipvault.sqlite aside to start fresh."
         }
     }
 }
@@ -95,7 +98,13 @@ public enum Schema {
     static func migrate(_ c: SQLiteConnection, databaseURL: URL) throws {
         let found = try version(c)
         if found > currentVersion { throw SchemaError.newerThanApp(found: found, supported: currentVersion) }
-        if found == currentVersion { return }
+        if found == currentVersion {
+            // R22: v1 changed once before release (seq / n-gram). Refuse such databases loudly.
+            let columns = try c.query("PRAGMA table_info(items)", []) { $0.text(1) ?? "" }
+            let tables = try c.query("SELECT name FROM sqlite_master WHERE type = 'table'", []) { $0.text(0) ?? "" }
+            guard columns.contains("seq"), tables.contains("items_ngram") else { throw SchemaError.incompatible("missing seq / items_ngram") }
+            return
+        }
         if found > 0 {
             // Forward migration of real user data: keep a copy first (sync-recovery §7).
             let backup = databaseURL.deletingLastPathComponent().appendingPathComponent("clipvault.sqlite.bak-v\(found)")

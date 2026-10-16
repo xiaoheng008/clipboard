@@ -36,7 +36,7 @@ import Testing
     // AC4.3 / I2 — verify reports a missing blob; healthy store verifies clean.
     @Test func verifyDetectsMissingBlob() async throws {
         let rt = try await runtime()
-        guard case .stored(let id, _) = await rt.service.ingest(image(1), context: ctx) else { return }
+        guard case .stored(let id, _) = await rt.service.ingest(image(1), context: ctx) else { Issue.record("ingest did not store"); return }
         #expect(try await Maintenance.verify(rt).problems.isEmpty)
         let hash = try #require(try await rt.db.blobHash(itemID: id))
         try FileManager.default.removeItem(at: rt.blobs.url(for: hash))
@@ -65,7 +65,7 @@ import Testing
 
     @Test func reindexResetsFailedAndEnqueuesMissing() async throws {
         let rt = try await runtime()
-        guard case .stored(let id, _) = await rt.service.ingest(image(1), context: ctx) else { return }
+        guard case .stored(let id, _) = await rt.service.ingest(image(1), context: ctx) else { Issue.record("ingest did not store"); return }
         // Make the vision job fail terminally.
         for _ in 0..<3 {
             let jobs = try await rt.db.claimJobs(limit: 5, activeModel: nil, leaseMs: 1)
@@ -124,7 +124,7 @@ import Testing
     // AC13.1 — an invariant violation makes the run fail with the observed value.
     @Test func brokenInvariantFails() async throws {
         let rt = try await MaintenanceTests().runtime()
-        guard case .stored(let id, _) = await rt.service.ingest(MaintenanceTests().image(3), context: MaintenanceTests().ctx) else { return }
+        guard case .stored(let id, _) = await rt.service.ingest(MaintenanceTests().image(3), context: MaintenanceTests().ctx) else { Issue.record("ingest did not store"); return }
         try FileManager.default.removeItem(at: rt.blobs.url(for: try #require(try await rt.db.blobHash(itemID: id))))
         let report = await Diagnostics.run(rt, probes: .unavailable)
         let check = try #require(report.checks.first { $0.name == "invariant.blobs" })
@@ -187,5 +187,92 @@ import Testing
         try await rt.service.delete(id: id)
         #expect(rt.blobs.exists(hash))
         await rt.service.unmarkBlobPending(hash)
+    }
+}
+
+@Suite struct ReviewP3Tests {
+    // R19 — structural scans must actually see the sources.
+    @Test func structureScansSeeSources() {
+        #expect(swiftSources(under: "Sources/ClipCore").count > 15)
+        #expect(swiftSources(under: "Sources").first { $0.path.hasSuffix("Storage/SQLite.swift") }?.text.contains("sqlite3_") == true)
+    }
+
+    // AC16.1 — log labels never carry clipboard content (static scan) and export works.
+    @Test func logLabelsCarryNoContent() {
+        let banned = ["text", "string", "query", "preview", "ocr", "snapshot", "content", "draft.text"]
+        var offenders: [String] = []
+        for f in swiftSources(under: "Sources") {
+            for line in f.text.split(separator: "\n") where line.contains(".label(") {
+                for arg in line.components(separatedBy: ".label(").dropFirst() {
+                    let inside = arg.prefix { $0 != ")" }.lowercased()
+                    if banned.contains(where: { inside.contains($0) }) { offenders.append("\(f.path): \(line.trimmingCharacters(in: .whitespaces))") }
+                }
+            }
+        }
+        #expect(offenders == [])
+    }
+
+    @Test func logExportCopiesFiles() throws {
+        let home = try makeTempHome()
+        let log = Log()
+        log.configure(directory: home.logsURL)
+        log.event("test.event", ["n": .int(1)])
+        let out = try log.export(to: home.tmpURL.appendingPathComponent("export"))
+        #expect(out.count == 1)
+        #expect(try String(contentsOf: out[0], encoding: .utf8).contains("test.event n=1"))
+        #expect(log.recentCount(of: "test.event", within: 60) == 1)
+    }
+
+    // AC4.2 (blob side) — a failing blob write leaves nothing behind and the next capture still works.
+    @Test func blobWriteFailureIsAtomic() async throws {
+        let rt = try await MaintenanceTests().runtime()
+        let fm = FileManager.default
+        try fm.setAttributes([.posixPermissions: 0o500], ofItemAtPath: rt.home.blobsURL.path)
+        defer { try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: rt.home.blobsURL.path) }
+        guard case .failed = await rt.service.ingest(MaintenanceTests().image(40), context: MaintenanceTests().ctx) else {
+            Issue.record("expected .failed"); return
+        }
+        let c = try await rt.db.counts()
+        #expect(c.items == 0 && c.ftsRows == 0 && c.jobsPending == 0)
+        #expect(try fm.contentsOfDirectory(atPath: rt.home.tmpURL.path).isEmpty)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: rt.home.blobsURL.path)
+        guard case .stored = await rt.service.ingest(MaintenanceTests().image(41), context: MaintenanceTests().ctx) else {
+            Issue.record("next capture failed"); return
+        }
+    }
+
+    // AC7.3 — a job whose claimant died is reclaimed after the lease and completed by the next drain.
+    @Test func reclaimedJobCompletes() async throws {
+        let clock = TestClock()
+        let db = try Database(home: try makeTempHome(), clock: clock.fn)
+        let (id, _) = try await JobQueueTests().imageItem(db, seed: 8)
+        _ = try await db.claimJobs(limit: 5, activeModels: [], leaseMs: 120_000)      // claimant "dies"
+        let worker = IndexWorker(db: db, blobs: BlobStore(home: db.home), ocr: FakeOCR())
+        #expect(await worker.drain().completed == 0)
+        clock.advance(ms: 120_001)
+        #expect(await worker.drain().completed == 1)
+        #expect(try await db.item(id: id)?.ocrText != nil)
+    }
+
+    // R22 — a database whose user_version says 1 but lacks the seq column fails loudly.
+    @Test func incompatibleV1DatabaseIsRejected() throws {
+        let home = try makeTempHome()
+        let c = try SQLiteConnection(path: home.databaseURL.path)
+        try c.exec("CREATE TABLE items(id INTEGER PRIMARY KEY, kind TEXT); PRAGMA user_version = 1")
+        #expect(throws: SchemaError.self) { _ = try Database(home: home) }
+    }
+
+    // AC5.3 — the panel's row window never exceeds its cap and never duplicates rows.
+    struct R: Identifiable, Equatable { let id: Int64 }
+    @Test func rowWindowIsBounded() {
+        var rows: [R] = []
+        var cursor: Int64 = 10_000
+        for _ in 0..<15 {
+            let page = (0..<60).map { _ -> R in cursor -= 1; return R(id: cursor) }
+            rows = RowWindow.append(page, to: rows, cap: 600)
+        }
+        #expect(rows.count == 600 && Set(rows.map(\.id)).count == 600)
+        let merged = RowWindow.mergeTop([R(id: 20_000), rows[5]], onto: rows, cap: 600)
+        #expect(merged.count == 600 && merged.first?.id == 20_000 && Set(merged.map(\.id)).count == 600)
     }
 }
