@@ -182,6 +182,7 @@ public actor ClipService {
             return .stored(id: r.id, isNew: r.isNew)
         } catch {
             recordSkip(.writeFailed)
+            db.home.recordWriteFailure()
             Log.shared.event("capture.write_failed", ["kind": .label(draft.kind.rawValue), "error": .error(error)])
             return .failed(String(describing: error))
         }

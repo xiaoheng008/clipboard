@@ -10,6 +10,24 @@ public struct AppHome: Sendable {
     public var modelsURL: URL { root.appendingPathComponent("models", isDirectory: true) }
     public var tmpURL: URL { root.appendingPathComponent("tmp", isDirectory: true) }
     public var logsURL: URL { root.appendingPathComponent("logs", isDirectory: true) }
+    /// Per-home record of capture write failures, readable by any process (R13). One ISO timestamp per line.
+    public var writeFailuresURL: URL { logsURL.appendingPathComponent("write-failures.log") }
+
+    public func recordWriteFailure(at date: Date = Date()) {
+        let line = Data((ISO8601DateFormatter().string(from: date) + "\n").utf8)
+        if let fh = try? FileHandle(forWritingTo: writeFailuresURL) {
+            _ = try? fh.seekToEnd(); try? fh.write(contentsOf: line); try? fh.close()
+        } else {
+            try? line.write(to: writeFailuresURL)
+        }
+    }
+
+    public func writeFailures(within seconds: TimeInterval) -> Int {
+        guard let text = try? String(contentsOf: writeFailuresURL, encoding: .utf8) else { return 0 }
+        let cutoff = Date(timeIntervalSinceNow: -seconds)
+        let parser = ISO8601DateFormatter()
+        return text.split(separator: "\n").compactMap { parser.date(from: String($0)) }.filter { $0 >= cutoff }.count
+    }
 
     public init(root: URL) throws {
         self.root = root

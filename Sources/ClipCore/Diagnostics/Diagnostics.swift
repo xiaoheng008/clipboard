@@ -73,8 +73,8 @@ public enum Diagnostics {
         if let free = (try? rt.home.root.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?.volumeAvailableCapacityForImportantUsage {
             add("disk.free", diskStatus(freeBytes: free), ByteCountFormatter.string(fromByteCount: free, countStyle: .file) + " available")
         }
-        // Write failures from any process are in the shared log (skip counters are per process).
-        let recentWriteFailures = Log.shared.recentCount(of: "capture.write_failed", within: 24 * 3600)
+        // Write failures from any process are recorded per data directory (skip counters are per process).
+        let recentWriteFailures = rt.home.writeFailures(within: 24 * 3600)
         add("capture.write_failures", recentWriteFailures > 0 ? .fail : .pass, "\(recentWriteFailures) in the last 24 h")
         let skips = await rt.service.skipCounts()
         add("capture.skips", .pass,

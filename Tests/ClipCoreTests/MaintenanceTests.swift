@@ -276,3 +276,16 @@ import Testing
         #expect(merged.count == 600 && merged.first?.id == 20_000 && Set(merged.map(\.id)).count == 600)
     }
 }
+
+@Suite struct WriteFailureRecordTests {
+    // R13 — write failures are visible to diagnostics in any process, per data directory.
+    @Test func recordedPerHomeAndCountedByDiagnostics() async throws {
+        let rt = try await MaintenanceTests().runtime()
+        #expect(rt.home.writeFailures(within: 3600) == 0)
+        rt.home.recordWriteFailure()
+        rt.home.recordWriteFailure(at: Date(timeIntervalSinceNow: -2 * 86400))     // too old
+        #expect(rt.home.writeFailures(within: 24 * 3600) == 1)
+        let report = await Diagnostics.run(rt, probes: .unavailable)
+        #expect(report.checks.first { $0.name == "capture.write_failures" }?.status == .fail)
+    }
+}
