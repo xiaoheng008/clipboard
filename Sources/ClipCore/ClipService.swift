@@ -88,6 +88,19 @@ public actor ClipService {
     public nonisolated let catalog: ModelCatalog
 
     private var lastSelfWriteChangeCount: Int?
+    /// R4: blobs written to disk whose item is not committed yet; deletes must not unlink them.
+    private var pendingBlobs: [String: Int] = [:]
+    func markBlobPending(_ h: String) { pendingBlobs[h, default: 0] += 1 }
+    func unmarkBlobPending(_ h: String) {
+        if let n = pendingBlobs[h], n > 1 { pendingBlobs[h] = n - 1 } else { pendingBlobs[h] = nil }
+    }
+
+    /// Unlinks freed blobs, re-checking right before each unlink (R4).
+    private func unlinkFreed(_ hashes: [String]) async {
+        for h in hashes where pendingBlobs[h] == nil {
+            if (try? await db.isBlobReferenced(h)) == false, pendingBlobs[h] == nil { try? blobs.delete(h) }
+        }
+    }
     private var excluded: Set<String> = []
     private var skips: [SkipReason: Int] = [:]
     private var lastCaptureAt: Date?
@@ -145,14 +158,19 @@ public actor ClipService {
             var blobHash: String?
             var jobs: [JobSpec] = []
             if let image = draft.image {
-                blobHash = try blobs.put(image.data)            // file before transaction (I2)
+                let h = try blobs.put(image.data)               // file before transaction (I2)
+                blobHash = h
+                markBlobPending(h)
                 jobs.append(.vision)
                 if let m = active[.image] { jobs.append(.embed(m.id)) }
             } else if Self.textEmbeddedKinds.contains(draft.kind), let m = active[.text] {
                 jobs.append(.embed(m.id))
             }
             let source = SourceApp(bundleID: context.frontmostBundleID, name: context.frontmostName)
-            let r = try await db.ingest(draft, blobHash: blobHash, source: source, jobs: jobs)
+            let r: IngestResult
+            do { r = try await db.ingest(draft, blobHash: blobHash, source: source, jobs: jobs) }
+            catch { if let blobHash { unmarkBlobPending(blobHash) }; throw error }
+            if let blobHash { unmarkBlobPending(blobHash) }
             lastCaptureAt = Date()
             Log.shared.event("capture.stored", ["id": .int(r.id), "kind": .label(draft.kind.rawValue), "new": .bool(r.isNew), "bytes": .int(Int64(draft.byteSize))])
             emit(.itemsChanged)
@@ -186,7 +204,7 @@ public actor ClipService {
 
     public func delete(id: Int64) async throws {
         let freed = try await db.delete(id: id)
-        for h in freed { try? blobs.delete(h) }           // failure leaves an orphan for --gc
+        await unlinkFreed(freed)                          // failure leaves an orphan for --gc
         await engine.activeIndex?.remove(ids: [id])
         await textEngine.activeIndex?.remove(ids: [id])
         Log.shared.event("item.deleted", ["id": .int(id)])
@@ -196,7 +214,7 @@ public actor ClipService {
     /// Q4: everything, pinned included. Caller is responsible for the confirmation step.
     public func clearAll() async throws {
         let freed = try await db.clearAll()
-        for h in freed { try? blobs.delete(h) }
+        await unlinkFreed(freed)
         if let idx = await engine.activeIndex { await idx.replaceAll([]) }
         if let idx = await textEngine.activeIndex { await idx.replaceAll([]) }
         Log.shared.event("items.cleared", ["blobs": .int(Int64(freed.count))])
@@ -352,9 +370,9 @@ public struct Runtime: Sendable {
 
     public static func open(home: AppHome, services: PlatformServices,
                             clock: @escaping @Sendable () -> Int64 = Database.systemClock,
-                            startWorker: Bool = true, requireInstalledModel: Bool = true) async throws -> Runtime {
+                            startWorker: Bool = true, requireInstalledModel: Bool = true, sweepTmp: Bool = true) async throws -> Runtime {
         Log.shared.configure(directory: home.logsURL)
-        home.cleanTmp()
+        if sweepTmp { home.cleanTmp() }
         let db = try Database(home: home, clock: clock)
         let reads = try ReadStore(home: home)
         let blobs = BlobStore(home: home)

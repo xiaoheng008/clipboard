@@ -27,11 +27,15 @@ public struct AppHome: Sendable {
         return try AppHome(root: support.appendingPathComponent("ClipVault", isDirectory: true))
     }
 
-    /// Removes leftovers of interrupted writes / downloads. Safe at startup: nothing in tmp is referenced.
-    public func cleanTmp() {
+    /// Removes leftovers of interrupted writes / downloads. Another process (CLI or app) may be using
+    /// tmp/ right now (E23), so only entries untouched for `olderThan` seconds are removed (R3).
+    public func cleanTmp(olderThan age: TimeInterval = 6 * 3600) {
         let fm = FileManager.default
+        let cutoff = Date(timeIntervalSinceNow: -age)
         for name in (try? fm.contentsOfDirectory(atPath: tmpURL.path)) ?? [] {
-            try? fm.removeItem(at: tmpURL.appendingPathComponent(name))
+            let url = tmpURL.appendingPathComponent(name)
+            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            if modified < cutoff { try? fm.removeItem(at: url) }
         }
     }
 }

@@ -130,3 +130,41 @@ struct MobileCLIPIntegrationTests {
         #expect(HotKeyCombo.resolve(setting: "garbage") == nil)
     }
 }
+
+@Suite struct ModelPathSafetyTests {
+    // R1 — ids that resolve outside models/ are rejected; nothing is deleted.
+    @Test(arguments: ["..", ".", "", "a/b", "../x", "x/../..", "/abs"])
+    func removeRejectsUnsafeIDs(id: String) async throws {
+        let home = try tempHome()
+        try Data("db".utf8).write(to: home.databaseURL)
+        await #expect(throws: (any Error).self) { try await ModelInstaller(home: home).remove(id) }
+        #expect(FileManager.default.fileExists(atPath: home.databaseURL.path))
+        #expect(FileManager.default.fileExists(atPath: home.modelsURL.path))
+    }
+
+    // R2 — a manifest file path escaping the staging directory is rejected before anything is written.
+    @Test(arguments: ["../../clipvault.sqlite", "image.mlpackage/../../../x", "/etc/x", ""])
+    func installRejectsEscapingPaths(path: String) async throws {
+        let home = try tempHome()
+        try Data("precious".utf8).write(to: home.databaseURL)
+        let src = home.root.appendingPathComponent("payload.bin")
+        try Data("evil".utf8).write(to: src)
+        let m = ModelManifest(id: "evil@1", family: "coreml-clip", displayName: "x", tier: 0, dim: 4, imageSize: nil, contextLength: nil,
+                              minMemoryGB: 0, imageInput: nil, textInput: nil, output: nil, tokenizer: nil,
+                              files: [ModelFile(path: path, url: src.absoluteString, sha256: String(repeating: "0", count: 64), size: 4)], notes: nil)
+        await #expect(throws: InstallError.self) { try await ModelInstaller(home: home).install(m) }
+        #expect(try Data(contentsOf: home.databaseURL) == Data("precious".utf8))
+        #expect(!FileManager.default.fileExists(atPath: home.root.appendingPathComponent("x").path))
+    }
+
+    @Test func catalogDropsUnsafeCustomEntries() throws {
+        let custom = """
+        {"models":[{"id":"..","family":"coreml-clip","displayName":"bad","tier":0,"dim":4,"minMemoryGB":0,"files":[]},
+                   {"id":"ok@1","family":"coreml-clip","displayName":"bad path","tier":0,"dim":4,"minMemoryGB":0,
+                    "files":[{"path":"../x","url":"https://example.com/x","sha256":"00","size":1}]},
+                   {"id":"good@1","family":"coreml-clip","displayName":"good","tier":0,"dim":4,"minMemoryGB":0,"files":[]}]}
+        """
+        let merged = try ModelCatalog.builtin().merging(customJSON: Data(custom.utf8))
+        #expect(merged.model(id: "..") == nil && merged.model(id: "ok@1") == nil && merged.model(id: "good@1") != nil)
+    }
+}

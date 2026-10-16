@@ -16,6 +16,7 @@ public enum InstallError: Error, CustomStringConvertible {
     case http(file: String, status: Int)
     case notDownloadable(String)
     case alreadyInstalling(String)
+    case unsafe(String)
     public var description: String {
         switch self {
         case let .checksumMismatch(f, e, a): "sha256 mismatch for \(f): expected \(e.prefix(12))…, got \(a.prefix(12))…"
@@ -23,6 +24,7 @@ public enum InstallError: Error, CustomStringConvertible {
         case let .http(f, s): "HTTP \(s) downloading \(f)"
         case .notDownloadable(let m): "\(m) has nothing to download"
         case .alreadyInstalling(let m): "\(m) is already being installed"
+        case .unsafe(let s): "rejected unsafe manifest: \(s)"
         }
     }
 }
@@ -37,6 +39,9 @@ public actor ModelInstaller {
 
     public func install(_ m: ModelManifest, progress: (@Sendable (InstallProgress) -> Void)? = nil) async throws {
         guard m.requiresInstall else { throw InstallError.notDownloadable(m.id) }
+        // R1/R2: validate everything that becomes a path before touching the disk.
+        guard ModelPaths.isSafeID(m.id) else { throw InstallError.unsafe("id \(m.id)") }
+        for f in m.files where !ModelPaths.isSafeRelativePath(f.path) { throw InstallError.unsafe("path \(f.path)") }
         guard !active.contains(m.id) else { throw InstallError.alreadyInstalling(m.id) }
         active.insert(m.id)
         defer { active.remove(m.id) }
@@ -48,7 +53,8 @@ public actor ModelInstaller {
             var done: Int64 = 0
             let total = m.downloadBytes
             for f in m.files {
-                let dest = staging.appendingPathComponent(f.path)
+                let dest = staging.appendingPathComponent(f.path).standardizedFileURL
+                guard dest.path.hasPrefix(staging.standardizedFileURL.path + "/") else { throw InstallError.unsafe("path \(f.path)") }
                 try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try await download(f, to: dest)
                 try Self.verify(f, at: dest)
@@ -70,7 +76,7 @@ public actor ModelInstaller {
             let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601; enc.outputFormatting = .prettyPrinted
             let record = InstallRecord(modelID: m.id, installedAt: Date(), compiled: compiled)
             try enc.encode(record).write(to: staging.appendingPathComponent("install.json"), options: .atomic)
-            let final = ModelPaths.directory(home: home, id: m.id)
+            let final = try ModelPaths.safeDirectory(home: home, id: m.id)
             if fm.fileExists(atPath: final.path) { try fm.removeItem(at: final) }
             try fm.moveItem(at: staging, to: final)
             progress?(InstallProgress(modelID: m.id, bytesDone: total, bytesTotal: total, phase: "done"))
@@ -83,7 +89,7 @@ public actor ModelInstaller {
     }
 
     public func remove(_ id: String) throws {
-        let dir = ModelPaths.directory(home: home, id: id)
+        let dir = try ModelPaths.safeDirectory(home: home, id: id)    // R1: never resolves outside models/
         if FileManager.default.fileExists(atPath: dir.path) { try FileManager.default.removeItem(at: dir) }
     }
 

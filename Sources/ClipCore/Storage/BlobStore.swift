@@ -17,7 +17,11 @@ public struct BlobStore: Sendable {
         let hash = ContentHasher.sha256Hex(data)
         let dest = url(for: hash)
         let fm = FileManager.default
-        if fm.fileExists(atPath: dest.path) { return hash }
+        if fm.fileExists(atPath: dest.path) {
+            // Refresh mtime: a re-put blob is "in use" again and inside gc's grace period (R4).
+            try? fm.setAttributes([.modificationDate: Date()], ofItemAtPath: dest.path)
+            return hash
+        }
         try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
         let tmp = home.tmpURL.appendingPathComponent("blob-\(UUID().uuidString)")
         guard fm.createFile(atPath: tmp.path, contents: nil) else { throw CocoaError(.fileWriteUnknown) }
@@ -59,6 +63,10 @@ public struct BlobStore: Sendable {
             }
         }
         return out
+    }
+
+    public func modificationDate(_ hash: String) -> Date? {
+        try? url(for: hash).resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
     }
 
     public func totalBytes() -> Int64 {

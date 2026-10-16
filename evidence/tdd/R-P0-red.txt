@@ -1,0 +1,8 @@
+Tests/ClipCoreTests/MaintenanceTests.swift failed with a nonzero exit code. Command line:     cd /Users/xiaoheng/Program/app
+Tests/ClipCoreTests/MaintenanceTests.swift:155:36: [1;31merror: [1;39margument passed to call that takes no arguments[0;0m
+Tests/ClipCoreTests/MaintenanceTests.swift:165:125: [1;31merror: [1;39mextra argument 'sweepTmp' in call[0;0m
+Tests/ClipCoreTests/MaintenanceTests.swift:175:70: [1;31merror: [1;39mextra argument 'minAge' in call[0;0m
+Tests/ClipCoreTests/MaintenanceTests.swift:186:26: [1;31merror: [1;39mvalue of type 'ClipService' has no member 'markBlobPending'[0;0m
+Tests/ClipCoreTests/MaintenanceTests.swift:189:26: [1;31merror: [1;39mvalue of type 'ClipService' has no member 'unmarkBlobPending'[0;0m
+Tests/ClipCoreTests/MaintenanceTests.swift:54:72: [1;31merror: [1;39mextra argument 'minAge' in call[0;0m
+Tests/ClipCoreTests/MaintenanceTests.swift:57:74: [1;31merror: [1;39mextra argument 'minAge' in call[0;0m

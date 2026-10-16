@@ -65,18 +65,25 @@ public enum Maintenance {
     }
 
     /// Orphan = blob file no item references (E13). Referenced blobs are never touched.
-    public static func gc(_ rt: Runtime, scope: MaintenanceScope) async throws -> GCReport {
+    /// R4: a blob younger than `minAge` may belong to a capture that has not committed yet (possibly in
+    /// another process), so it is never an orphan; each candidate is re-checked right before unlinking.
+    public static func gc(_ rt: Runtime, scope: MaintenanceScope, minAge: TimeInterval = 600) async throws -> GCReport {
         let referenced = Set(try await rt.db.referencedBlobs().map(\.hash))
+        let cutoff = Date(timeIntervalSinceNow: -minAge)
         var r = GCReport()
-        r.orphans = try rt.blobs.allHashes().subtracting(referenced).sorted()
+        r.orphans = try rt.blobs.allHashes().subtracting(referenced)
+            .filter { (rt.blobs.modificationDate($0) ?? .distantPast) <= cutoff }.sorted()
+        func unlink(_ h: String) async throws -> Bool {
+            guard try await !rt.db.isBlobReferenced(h) else { return false }
+            try rt.blobs.delete(h); return true
+        }
         switch scope {
         case .dryRun: break
         case .only(let h):
-            guard r.orphans.contains(h) else { throw CLIError.usage("\(h) is not an orphan blob") }
-            try rt.blobs.delete(h); r.deleted = [h]
+            guard r.orphans.contains(h) else { throw CLIError.usage("\(h) is not an orphan blob (or younger than \(Int(minAge)) s)") }
+            if try await unlink(h) { r.deleted = [h] }
         case .all:
-            for h in r.orphans { try rt.blobs.delete(h) }
-            r.deleted = r.orphans
+            for h in r.orphans where try await unlink(h) { r.deleted.append(h) }
         }
         Log.shared.event("maint.gc", ["orphans": .int(Int64(r.orphans.count)), "deleted": .int(Int64(r.deleted.count))])
         return r

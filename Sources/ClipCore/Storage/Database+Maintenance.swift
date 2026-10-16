@@ -12,6 +12,10 @@ extension Database {
         try conn.query("SELECT id, blob_hash FROM items WHERE blob_hash IS NOT NULL") { ($0.int(0), $0.text(1) ?? "") }
     }
 
+    public func isBlobReferenced(_ hash: String) throws -> Bool {
+        try conn.scalarInt("SELECT count(*) FROM items WHERE blob_hash = ?", [hash]) > 0
+    }
+
     public func expiredLeases() throws -> Int {
         Int(try conn.scalarInt("SELECT count(*) FROM index_jobs WHERE state = 'running' AND lease_until < ?", [now()]))
     }

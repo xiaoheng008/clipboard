@@ -44,7 +44,8 @@ enum CLI {
     static func openRuntime() async throws -> Runtime {
         let home = try AppHome.resolve()
         ModelInstaller(home: home).cleanIncomplete()
-        return try await Runtime.open(home: home, services: .system(home: home), startWorker: false)
+        // R3: the CLI may run next to the app; never sweep tmp/ from here.
+        return try await Runtime.open(home: home, services: .system(home: home), startWorker: false, sweepTmp: false)
     }
 
     static func probes() async -> PlatformProbes {
@@ -284,7 +285,7 @@ enum CLI {
             return 0
         case "remove":
             let pos = try check(rest, positional: 1)
-            guard let id = pos.first else { throw CLIError.usage("remove needs a model id") }
+            guard let id = pos.first, catalog.model(id: id) != nil else { throw CLIError.usage("unknown model \(pos.first ?? "")") }
             if await rt.service.activeModelManifest(slot: catalog.model(id: id)?.slot ?? .image)?.id == id { throw CLIError.usage("\(id) is active; deactivate or activate another first") }
             try await ModelInstaller(home: rt.home).remove(id)
             print("removed files of \(id) (vectors kept; see --model purge-inactive)")

@@ -77,7 +77,7 @@ public struct ModelCatalog: Codable, Sendable, Equatable {
     public func merging(customJSON: Data) throws -> ModelCatalog {
         let custom = try JSONDecoder().decode(ModelCatalog.self, from: customJSON)
         var out = models
-        for m in custom.models {
+        for m in custom.models where ModelPaths.manifestIsSafe(m) {   // R1/R2: unsafe entries are ignored
             if let i = out.firstIndex(where: { $0.id == m.id }) { out[i] = m } else { out.append(m) }
         }
         return ModelCatalog(models: out)
@@ -100,6 +100,16 @@ public struct ModelCatalog: Codable, Sendable, Equatable {
     }
 }
 
+public enum ModelPathError: Error, CustomStringConvertible {
+    case unsafeID(String), unsafePath(String)
+    public var description: String {
+        switch self {
+        case .unsafeID(let s): "unsafe model id '\(s)'"
+        case .unsafePath(let s): "unsafe model file path '\(s)'"
+        }
+    }
+}
+
 /// Two independent active models: one for images, one for text semantics (FR20).
 public enum ModelSlot: String, Sendable, CaseIterable, Codable {
     case image, text
@@ -116,8 +126,32 @@ public struct InstallRecord: Codable, Sendable, Equatable {
 }
 
 public enum ModelPaths {
+    /// R1: ids become directory names under models/. Only a conservative charset; never "." / "..".
+    public static func isSafeID(_ id: String) -> Bool {
+        guard !id.isEmpty, id.count <= 100, id != ".", id != "..", !id.hasPrefix(".") else { return false }
+        return id.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) && $0.isASCII || "._@-".unicodeScalars.contains($0) }
+    }
+
+    /// R2: manifest file paths are relative, non-empty, without "." / ".." components.
+    public static func isSafeRelativePath(_ path: String) -> Bool {
+        guard !path.isEmpty, !path.hasPrefix("/"), !path.contains("\\") else { return false }
+        return path.split(separator: "/", omittingEmptySubsequences: false).allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." }
+    }
+
+    public static func manifestIsSafe(_ m: ModelManifest) -> Bool {
+        isSafeID(m.id) && m.files.allSatisfy { isSafeRelativePath($0.path) }
+    }
+
     public static func directory(home: AppHome, id: String) -> URL {
         home.modelsURL.appendingPathComponent(id.replacingOccurrences(of: "/", with: "_"), isDirectory: true)
+    }
+
+    /// Directory for a validated id; throws instead of resolving outside models/.
+    public static func safeDirectory(home: AppHome, id: String) throws -> URL {
+        guard isSafeID(id) else { throw ModelPathError.unsafeID(id) }
+        let dir = directory(home: home, id: id).standardizedFileURL
+        guard dir.deletingLastPathComponent().path == home.modelsURL.standardizedFileURL.path else { throw ModelPathError.unsafeID(id) }
+        return dir
     }
 
     public static func installRecord(home: AppHome, id: String) -> InstallRecord? {

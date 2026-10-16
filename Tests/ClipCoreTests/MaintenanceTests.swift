@@ -16,6 +16,11 @@ import Testing
 }
 
 @Suite struct MaintenanceTests {
+    var servicesForTests: PlatformServices {
+        PlatformServices(ocr: FakeOCR(), translator: NoTranslator(), pasteboard: FakeWriter(),
+                         makeProvider: { m in var e = FakeEmbedder(); e.modelID = m.id; e.dimension = m.dim; return e }, memoryGB: { 16 })
+    }
+
     func runtime() async throws -> Runtime {
         let services = PlatformServices(ocr: FakeOCR(), translator: NoTranslator(), pasteboard: FakeWriter(),
                                         makeProvider: { m in var e = FakeEmbedder(); e.modelID = m.id; e.dimension = m.dim; return e }, memoryGB: { 16 })
@@ -46,13 +51,13 @@ import Testing
         _ = await rt.service.ingest(image(1), context: ctx)
         let o1 = try rt.blobs.put(pngBytes(seed: 50))       // orphans: written but never committed (E13)
         let o2 = try rt.blobs.put(pngBytes(seed: 51))
-        let dry = try await Maintenance.gc(rt, scope: .dryRun)
+        let dry = try await Maintenance.gc(rt, scope: .dryRun, minAge: 0)
         #expect(Set(dry.orphans) == [o1, o2] && dry.deleted.isEmpty)
         #expect(rt.blobs.exists(o1))
-        let one = try await Maintenance.gc(rt, scope: .only(o1))
+        let one = try await Maintenance.gc(rt, scope: .only(o1), minAge: 0)
         #expect(one.deleted == [o1] && !rt.blobs.exists(o1) && rt.blobs.exists(o2))
-        await #expect(throws: CLIError.self) { _ = try await Maintenance.gc(rt, scope: .only("not-an-orphan")) }
-        let all = try await Maintenance.gc(rt, scope: .all)
+        await #expect(throws: CLIError.self) { _ = try await Maintenance.gc(rt, scope: .only("not-an-orphan"), minAge: 0) }
+        let all = try await Maintenance.gc(rt, scope: .all, minAge: 0)
         #expect(all.deleted == [o2])
         #expect(try await Maintenance.verify(rt).problems.isEmpty)
         #expect(try rt.blobs.allHashes().count == 1)
@@ -137,3 +142,50 @@ import Testing
     }
 }
 
+
+@Suite struct ConcurrencySafetyTests {
+    // R3 — opening a runtime from the CLI must not touch tmp/; the app only sweeps stale leftovers.
+    @Test func tmpSweepOnlyRemovesStaleEntries() throws {
+        let home = try makeTempHome()
+        let fresh = home.tmpURL.appendingPathComponent("model-inflight")
+        let stale = home.tmpURL.appendingPathComponent("blob-crashed")
+        try FileManager.default.createDirectory(at: fresh, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: stale.path, contents: Data("x".utf8))
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -7 * 3600)], ofItemAtPath: stale.path)
+        home.cleanTmp(olderThan: 6 * 3600)
+        #expect(FileManager.default.fileExists(atPath: fresh.path))
+        #expect(!FileManager.default.fileExists(atPath: stale.path))
+    }
+
+    @Test func cliRuntimeDoesNotSweepTmp() async throws {
+        let home = try makeTempHome()
+        let inflight = home.tmpURL.appendingPathComponent("blob-inflight")
+        FileManager.default.createFile(atPath: inflight.path, contents: Data("x".utf8))
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -7 * 3600)], ofItemAtPath: inflight.path)
+        _ = try await Runtime.open(home: home, services: MaintenanceTests().servicesForTests, startWorker: false, sweepTmp: false)
+        #expect(FileManager.default.fileExists(atPath: inflight.path))
+    }
+
+    // R4 — gc never deletes a blob younger than the grace period (it may be about to be committed).
+    @Test func gcSkipsRecentOrphans() async throws {
+        let rt = try await MaintenanceTests().runtime()
+        let young = try rt.blobs.put(pngBytes(seed: 70))
+        let dry = try await Maintenance.gc(rt, scope: .all)
+        #expect(dry.orphans.isEmpty && dry.deleted.isEmpty && rt.blobs.exists(young))
+        let aged = try await Maintenance.gc(rt, scope: .all, minAge: 0)
+        #expect(aged.deleted == [young])
+    }
+
+    // R4 — a blob being re-ingested (put done, commit pending) survives a concurrent delete of the old item.
+    @Test func deleteKeepsBlobPendingIngest() async throws {
+        let rt = try await MaintenanceTests().runtime()
+        guard case .stored(let id, _) = await rt.service.ingest(MaintenanceTests().image(5), context: MaintenanceTests().ctx) else {
+            Issue.record("ingest failed"); return
+        }
+        let hash = try #require(try await rt.db.blobHash(itemID: id))
+        await rt.service.markBlobPending(hash)
+        try await rt.service.delete(id: id)
+        #expect(rt.blobs.exists(hash))
+        await rt.service.unmarkBlobPending(hash)
+    }
+}
