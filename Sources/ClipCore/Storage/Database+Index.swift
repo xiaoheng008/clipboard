@@ -67,6 +67,29 @@ extension Database {
         }
     }
 
+    public func hasEmbedding(itemID: Int64, modelID: String) throws -> Bool {
+        try conn.scalarInt("SELECT count(*) FROM embeddings WHERE item_id = ? AND model_id = ?", [itemID, modelID]) > 0
+    }
+
+    /// FR25: the embed job of (item, model), if any, and whether its running lease is still live.
+    public func embedJob(itemID: Int64, modelID: String) throws -> (state: String, leaseLive: Bool, lastError: String?)? {
+        let t = now()
+        return try conn.query("SELECT state, lease_until, last_error FROM index_jobs WHERE item_id = ? AND kind = 'embed' AND model_id = ?",
+                              [itemID, modelID]) { ($0.text(0) ?? "", $0.int(1) >= t, $0.text(2)) }.first
+    }
+
+    /// Queue (or re-queue a failed) embed job for one item.
+    public func enqueueEmbed(itemID: Int64, modelID: String) throws {
+        try conn.transaction {
+            try conn.run("UPDATE index_jobs SET state = 'pending', attempts = 0, not_before = 0, last_error = NULL WHERE item_id = ? AND kind = 'embed' AND model_id = ? AND state = 'failed'",
+                         [itemID, modelID])
+            try insertJob(itemID: itemID, .embed(modelID))
+        }
+    }
+
+    /// Test helper: drop an item's jobs (simulates the "should not happen" missing state).
+    func purgeJobs(itemID: Int64) throws { try conn.run("DELETE FROM index_jobs WHERE item_id = ?", [itemID]) }
+
     public func embeddingVector(itemID: Int64, modelID: String) throws -> [Float]? {
         try conn.query("SELECT vec FROM embeddings WHERE item_id = ? AND model_id = ?", [itemID, modelID]) { $0.blob(0) }
             .first.flatMap { $0 }.map(VectorCodec.decode)

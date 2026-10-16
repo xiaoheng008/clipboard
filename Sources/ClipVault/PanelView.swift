@@ -358,8 +358,15 @@ struct SimilarStrip: View {
                     .padding(.vertical, 2)
                 }
             }
-            if let note = model.revealNote ?? model.similarNote {
-                Text(note).font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                if let note = model.revealNote ?? model.similarNote {
+                    if model.indexStatus == .queued || model.indexStatus == .running { ProgressView().controlSize(.mini) }
+                    Text(note).font(.caption).foregroundStyle(.secondary)
+                }
+                if case .failed = model.indexStatus {
+                    TrackedButton("重试", tracker: model.tracker, key: "panel.index.retry", name: "panel.index.retry.button") { model.retryIndex() }
+                        .font(.caption)
+                }
             }
         }
     }

@@ -35,14 +35,35 @@ final class PanelModel {
         similar = []
         similarNote = nil
         revealNote = nil
+        indexStatus = nil
         guard d?.summary.kind == .image else { return }
-        let r = await service.similarImages(to: id, limit: 8)
+        // FR25: say exactly where this image is in the index state machine (3.4 §3).
+        let status = await service.imageIndexStatus(itemID: id)
         guard selectedRow?.id == id else { return }         // selection moved on: drop the stale result
-        similar = r.hits.map { Row(item: $0.item, sources: $0.sources, similarity: $0.similarity) }
-        switch r.semantic {
-        case .notEnabled: similarNote = "启用图片搜索模型后可显示相似图片"
-        case .failed(let e): similarNote = e
-        default: similarNote = similar.isEmpty ? "没有相似图片" : nil
+        indexStatus = status
+        switch status {
+        case .indexed:
+            let r = await service.similarImages(to: id, limit: 8)
+            guard selectedRow?.id == id else { return }
+            similar = r.hits.map { Row(item: $0.item, sources: $0.sources, similarity: $0.similarity) }
+            similarNote = similar.isEmpty ? "没有相似图片" : nil
+        case .noModel: similarNote = "启用图片搜索模型后可显示相似图片"
+        case .slotBusy(let target): similarNote = "正在启用 \(target)…"
+        case .queued: similarNote = "正在排队建立索引…"
+        case .running: similarNote = "正在建立索引…"
+        case .failed(let e): similarNote = "建立索引失败：\(e)"
+        case .missing: similarNote = "尚未建立索引，已加入队列"
+        }
+    }
+
+    /// Index status of the selected image (FR25), nil for non-images.
+    private(set) var indexStatus: ImageIndexStatus?
+
+    func retryIndex() {
+        guard let row = selectedRow else { return }
+        tracker.perform(key: "panel.index.retry", name: "panel.index.retry", detail: String(row.id)) { [self] in
+            try await service.retryImageIndex(itemID: row.id)
+            await loadDetail(id: row.id)
         }
     }
 
@@ -279,6 +300,12 @@ final class PanelModel {
             case .failed: refresh()
             }
         case .cleared: refresh()
+        case .indexProgress, .modelChanged:
+            // FR25: re-derive the selected image's status until it is indexed (and after a model change).
+            if let row = selectedRow, row.item.kind == .image {
+                if case .modelChanged = event { Task { await loadDetail(id: row.id) } }
+                else if indexStatus != .indexed { Task { await loadDetail(id: row.id) } }
+            }
         default: break
         }
     }

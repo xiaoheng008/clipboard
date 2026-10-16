@@ -329,3 +329,50 @@ final class EventLog: @unchecked Sendable {
         await #expect(throws: ServiceError.self) { try await rt.service.setSemanticThresholds(modelID: "nope@1", floor: 0.5, margin: 0.1) }
     }
 }
+
+@Suite struct ImageIndexStatusTests {
+    var ctx: CaptureContext { CaptureContext(frontmostBundleID: nil, frontmostName: nil, excludedBundleIDs: [], lastSelfWriteChangeCount: nil) }
+    func image(_ seed: UInt8) -> PasteboardSnapshot {
+        PasteboardSnapshot(changeCount: 1, types: ["public.png"], image: CapturedImage(data: pngBytes(seed: seed), uti: "public.png", width: 1, height: 1))
+    }
+
+    // AC25.1 — every derived state of 3.4 §3.
+    @Test func derivedStates() async throws {
+        let clock = TestClock()
+        let services = PlatformServices(ocr: FakeOCR(), translator: NoTranslator(), pasteboard: FakeWriter(),
+                                        makeProvider: { m in var e = FakeEmbedder(); e.modelID = m.id; e.dimension = m.dim; return e }, memoryGB: { 16 })
+        let rt = try await Runtime.open(home: try makeTempHome(), services: services, clock: clock.fn, startWorker: false, requireInstalledModel: false)
+        guard case .stored(let id, _) = await rt.service.ingest(image(1), context: ctx) else { Issue.record("ingest"); return }
+        #expect(await rt.service.imageIndexStatus(itemID: id) == .noModel)
+
+        try await rt.service.activateModel(id: "siglip2-base@1", requireInstalled: false)
+        #expect(await rt.service.imageIndexStatus(itemID: id) == .queued)             // backfill enqueued on activation
+
+        _ = try await rt.db.claimJobs(limit: 10, activeModels: ["siglip2-base@1"], leaseMs: 60_000)
+        #expect(await rt.service.imageIndexStatus(itemID: id) == .running)
+
+        clock.advance(ms: 60_001)                                                     // lease expired: back to waiting
+        #expect(await rt.service.imageIndexStatus(itemID: id) == .queued)
+
+        _ = await rt.worker.drain()
+        #expect(await rt.service.imageIndexStatus(itemID: id) == .indexed)
+
+        // failed: job exhausted its retries
+        guard case .stored(let id2, _) = await rt.service.ingest(image(2), context: ctx) else { Issue.record("ingest"); return }
+        for _ in 0..<3 {
+            for j in try await rt.db.claimJobs(limit: 10, activeModels: ["siglip2-base@1"], leaseMs: 1) where j.itemID == id2 && j.kind == "embed" {
+                try await rt.db.failJob(job: j, error: "decoder exploded", maxAttempts: 3)
+            }
+            try await rt.db.forceJobsClaimable()
+        }
+        guard case .failed(let reason) = await rt.service.imageIndexStatus(itemID: id2) else { Issue.record("expected failed"); return }
+        #expect(reason.contains("decoder exploded"))
+        try await rt.service.retryImageIndex(itemID: id2)
+        #expect(await rt.service.imageIndexStatus(itemID: id2) == .queued)
+
+        // missing: no vector, no job (should not happen) → reported and self-healed by enqueueing
+        try await rt.db.purgeJobs(itemID: id2)
+        #expect(await rt.service.imageIndexStatus(itemID: id2) == .missing)
+        #expect(await rt.service.imageIndexStatus(itemID: id2) == .queued)
+    }
+}

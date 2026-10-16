@@ -66,6 +66,17 @@ public struct SemanticThresholds: Sendable, Equatable {
     public init(floor: Float, margin: Float, isDefault: Bool) { self.floor = floor; self.margin = margin; self.isDefault = isDefault }
 }
 
+/// FR25 — derived index status of one image under the active image model (3.4 §3). Never stored.
+public enum ImageIndexStatus: Sendable, Equatable {
+    case noModel                 // image slot inactive
+    case slotBusy(String)        // image slot activating this model
+    case indexed
+    case queued                  // pending, or running with an expired lease (will be reclaimed)
+    case running                 // a worker holds a live lease
+    case failed(String)          // retries exhausted; reason
+    case missing                 // no vector and no job — reported once and self-healed by enqueueing
+}
+
 /// FR23 — model slot state machine (3.4 §2). previous keeps serving search while a new model loads.
 public enum ModelSlotState: Sendable, Equatable {
     case inactive
@@ -344,6 +355,32 @@ public actor ClipService {
         let hits = RankFusion.fuse(text: textHits, semantic: semanticHits, threshold: -.infinity, limit: req.limit)
         return SearchResponse(requestID: req.requestID, hits: hits, semantic: status, untranslatedCJK: untranslated,
                               error: searchError, elapsedMs: Date().timeIntervalSince(started) * 1000)
+    }
+
+    // MARK: Image index status (FR25)
+
+    public func imageIndexStatus(itemID: Int64) async -> ImageIndexStatus {
+        if case .activating(let target, _) = slotState(.image) { return .slotBusy(target) }
+        guard let m = active[.image] else { return .noModel }
+        if (try? await db.hasEmbedding(itemID: itemID, modelID: m.id)) == true { return .indexed }
+        if let job = try? await db.embedJob(itemID: itemID, modelID: m.id) {
+            switch job.state {
+            case "failed": return .failed(job.lastError ?? "未知原因")
+            case "running" where job.leaseLive: return .running
+            default: return .queued
+            }
+        }
+        // Should not happen (ingest and activation enqueue): heal it so the next look shows progress.
+        try? await db.enqueueEmbed(itemID: itemID, modelID: m.id)
+        await worker.wake()
+        Log.shared.event("index.missing_healed", ["item": .int(itemID), "model": .label(m.id)])
+        return .missing
+    }
+
+    public func retryImageIndex(itemID: Int64) async throws {
+        guard let m = active[.image] else { return }
+        try await db.enqueueEmbed(itemID: itemID, modelID: m.id)
+        await worker.wake()
     }
 
     // MARK: Similar images
