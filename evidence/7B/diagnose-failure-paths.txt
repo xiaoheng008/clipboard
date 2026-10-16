@@ -1,0 +1,13 @@
+## 2026-10-17 diagnose failure paths (AC13.1 F, AC4.4 F), packaged build
+
+### I2 violation: delete one blob file, then --diagnose
+<scratch>/imgset/code.png: stored(id: 1, isNew: true)
+<scratch>/imgset/invoice.png: stored(id: 2, isNew: true)
+[Diag] storage                 PASS  items=2 images=2 blobs=0.0 MB
+[Diag] invariant.blobs         FAIL  missing blob files: 1
+[Diag] invariant.fts           PASS  fts rows 2 / items 2
+diagnose exit=1
+
+### schema newer than the app (user_version 99)
+error: Database schema v99 is newer than this app supports (v1). Please upgrade ClipVault.
+diagnose exit=1   (re-measured without a pipe; the 0 first recorded here was tail's exit status)

@@ -1,0 +1,28 @@
+bench home: /var/folders/8v/_k6th0551wxbvkj717v6brjr0000gn/T/clipvault-bench-D959B581-2EE2-4650-BD7A-E4824909127B
+  inserted 100000/1000000 (34s)
+  inserted 200000/1000000 (76s)
+  inserted 300000/1000000 (115s)
+  inserted 400000/1000000 (158s)
+  inserted 500000/1000000 (200s)
+  inserted 600000/1000000 (249s)
+  inserted 700000/1000000 (294s)
+  inserted 800000/1000000 (359s)
+  inserted 900000/1000000 (414s)
+  inserted 1000000/1000000 (466s)
+insert: 1000000 items in 466.2s (2145 items/s)
+database size: 987.7 MB
+plan 'clipboard': SCAN f VIRTUAL TABLE INDEX 192:M1 | SEARCH i USING COVERING INDEX items_recent (pinned=? AND seq=?)
+page.first p50=0.1ms p95=0.1ms budget=50ms PASS rows=60
+search.fts 'clipboard' p50=91.9ms p95=98.8ms budget=50ms FAIL hits=200
+search.fts 'invoice report' p50=69.0ms p95=73.6ms budget=50ms FAIL hits=200
+search.fts '数据库' p50=0.3ms p95=0.9ms budget=50ms PASS hits=112
+search.fts '剪切板历史' p50=0.2ms p95=0.3ms budget=50ms PASS hits=0
+search.fts '#987654' p50=1.1ms p95=1.3ms budget=50ms PASS hits=1
+search.fts 'nonexistentterm' p50=0.1ms p95=0.1ms budget=50ms PASS hits=0
+search.like '发票' p50=2.2ms p95=2.7ms budget=150ms PASS hits=200
+search.like '图' p50=86.6ms p95=88.8ms budget=150ms PASS hits=200
+search.like 'zz' p50=0.1ms p95=0.2ms budget=150ms PASS hits=0
+vector.load: 100000 × 512 in 18ms (≈98 MB fp16)
+vector.search k=100 p50=5.1ms p95=5.6ms budget=30ms PASS 
+SOME BUDGETS MISSED
+exit=1
