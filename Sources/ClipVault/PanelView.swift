@@ -247,10 +247,25 @@ struct PreviewPane: View {
                         SimilarStrip(model: model)
                     } else {
                         // Bounded: very large texts show a prefix (full text is still copied).
-                        Text(String((detail?.text ?? row.item.preview ?? "").prefix(20_000)))
+                        Text(Self.linkified(String((detail?.text ?? row.item.preview ?? "").prefix(20_000))))
                             .font(.system(size: 12, design: .monospaced))
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                        if row.item.kind == .url, let url = LinkDetector.safeURL(detail?.text ?? row.item.preview ?? "") {
+                            Button { model.openLink(url) } label: { Label("在浏览器中打开", systemImage: "safari") }
+                        }
+                        if row.item.kind == .file {
+                            let files = FileItemPaths.resolve(text: detail?.text ?? row.item.preview ?? "")
+                            if !files.existing.isEmpty {
+                                Button { model.revealInFinder(files.existing) } label: {
+                                    Label(files.existing.count > 1 ? "在访达中显示（\(files.existing.count) 个文件）" : "在访达中显示", systemImage: "folder")
+                                }
+                            }
+                            if !files.missing.isEmpty {
+                                Text(files.existing.isEmpty ? "文件已不存在（可能已被移动或删除）" : "\(files.missing.count) 个文件已不存在")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
                     }
                     if let ocr = detail?.ocrText, !ocr.isEmpty {
                         Divider()
@@ -265,8 +280,23 @@ struct PreviewPane: View {
                 }
                 .padding(12)
                 .task(id: row.id) { await model.loadDetail(id: row.id) }
+                // FR21: clicked links open in the default browser and the panel gets out of the way.
+                .environment(\.openURL, OpenURLAction { url in
+                    guard LinkDetector.safeURL(url.absoluteString) != nil else { return .discarded }
+                    model.openLink(url)
+                    return .handled
+                })
             }
         }
+    }
+
+    /// Web / mail links in the text become clickable (LinkDetector decides which schemes are allowed).
+    static func linkified(_ text: String) -> AttributedString {
+        let links = LinkDetector.links(in: text)
+        guard !links.isEmpty else { return AttributedString(text) }
+        let ns = NSMutableAttributedString(string: text)
+        for l in links { ns.addAttribute(.link, value: l.url, range: NSRange(l.range, in: text)) }
+        return AttributedString(ns)
     }
 
     private func info(_ s: ItemSummary) -> String {

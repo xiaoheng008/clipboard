@@ -1,0 +1,2 @@
+Tests/ClipCoreTests/SearchTests.swift failed with a nonzero exit code. Command line:     cd /Users/xiaoheng/Program/app
+Tests/ClipCoreTests/SearchTests.swift:179:17: [1;31merror: [1;39mcannot find 'FileItemPaths' in scope[0;0m

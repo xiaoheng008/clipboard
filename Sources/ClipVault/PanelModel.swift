@@ -195,6 +195,18 @@ final class PanelModel {
 
     // MARK: Actions
 
+    /// FR22: open Finder at the files' folder with the files selected, then close the panel.
+    func revealInFinder(_ urls: [URL]) {
+        NSWorkspace.shared.activateFileViewerSelecting(urls)
+        onClose?()
+    }
+
+    /// FR21: open a link from the detail pane in the default browser, then close the panel.
+    func openLink(_ url: URL) {
+        NSWorkspace.shared.open(url)
+        onClose?()
+    }
+
     func copySelected() {
         guard let row = selectedRow else { return }
         Task {

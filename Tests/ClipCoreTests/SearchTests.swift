@@ -145,3 +145,44 @@ import Testing
         #expect(try await rs.search(QueryPlanner.plan("A_"), kind: .all, limit: 10).map(\.item.id) == [ids[2]])
     }
 }
+
+@Suite struct LinkDetectorTests {
+    // FR21 — links in item text are found; only safe schemes are clickable.
+    @Test func findsWebAndMailLinks() {
+        let text = "文档在 https://github.com/xiaoheng008/clipboard ，有问题发 me@example.com 或看 http://例子.中国/路径?q=1"
+        let links = LinkDetector.links(in: text)
+        #expect(links.map(\.url.absoluteString).contains("https://github.com/xiaoheng008/clipboard"))
+        #expect(links.contains { $0.url.scheme == "mailto" })
+        #expect(links.contains { $0.url.scheme == "http" })
+        for l in links { #expect(String(text[l.range]).isEmpty == false) }
+    }
+
+    @Test(arguments: ["file:///etc/passwd", "javascript:alert(1)", "vscode://open?x", "ssh://host", "x-apple.systempreferences:com.apple"])
+    func rejectsUnsafeSchemes(raw: String) {
+        #expect(LinkDetector.safeURL(raw) == nil)
+        #expect(LinkDetector.links(in: "go \(raw) now").isEmpty)
+    }
+
+    @Test func urlItemIsOpenable() {
+        #expect(LinkDetector.safeURL(" https://example.com/a?b=1 ")?.absoluteString == "https://example.com/a?b=1")
+        #expect(LinkDetector.safeURL("not a url") == nil)
+    }
+}
+
+@Suite struct FileItemPathsTests {
+    // FR22 — file items reveal their files in Finder; missing files are reported, not opened.
+    @Test func splitsPathsAndChecksExistence() throws {
+        let home = try makeTempHome()
+        let present = home.tmpURL.appendingPathComponent("报告 final.pdf")
+        try Data("x".utf8).write(to: present)
+        let missing = home.tmpURL.appendingPathComponent("gone.txt").path
+        let r = FileItemPaths.resolve(text: present.path + "\n" + missing + "\n\n")
+        #expect(r.existing.map(\.path) == [present.path])
+        #expect(r.missing == [missing])
+    }
+
+    @Test func ignoresNonAbsoluteLines() {
+        let r = FileItemPaths.resolve(text: "relative/path\n~/notexpanded")
+        #expect(r.existing.isEmpty && r.missing.isEmpty)
+    }
+}
