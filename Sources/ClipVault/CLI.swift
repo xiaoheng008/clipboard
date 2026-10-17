@@ -25,6 +25,7 @@ enum CLI {
       --bench [--items N] [--images N] [--dim N]   synthetic benchmark in a temporary home
       --login-item status | on | off     launch at login (off by default)
       --slow-ops [--limit N]             slowest button / shortcut actions (1000 kept)
+      --snapshot <dir>                   render panel / settings offscreen to PNGs (needs CLIPVAULT_HOME = demo dir)
       --eval-text <dataset.json> --model <id>   text-model retrieval eval in a fresh temporary home
       --export-logs <dir>
       --version | --help
@@ -206,7 +207,7 @@ enum CLI {
             return try await model(rest)
 
         case "--bench":
-            _ = try check(rest, valued: ["--items", "--images", "--dim"])
+            _ = try check(rest, allowed: ["--keep"], valued: ["--items", "--images", "--dim"])
             let items = Int(try option(rest, "--items") ?? "100000") ?? 100_000
             let images = Int(try option(rest, "--images") ?? "100000") ?? 100_000
             let dim = Int(try option(rest, "--dim") ?? "512") ?? 512
@@ -220,9 +221,10 @@ enum CLI {
                 }
             }
             let root = tmp.appendingPathComponent("clipvault-bench-\(UUID().uuidString)")
-            defer { try? FileManager.default.removeItem(at: root) }
+            let keep = rest.contains("--keep")   // keep the database for query-plan analysis
+            defer { if !keep { try? FileManager.default.removeItem(at: root) } }
             let home = try AppHome(root: root)
-            print("bench home: \(root.path)")
+            print("bench home: \(root.path)\(keep ? " (kept)" : "")")
             let r = try await Bench.run(home: home, items: items, images: images, dim: dim) { print($0) }
             print(r.budgetsMet ? "ALL BUDGETS MET" : "SOME BUDGETS MISSED")
             return r.budgetsMet ? 0 : 1

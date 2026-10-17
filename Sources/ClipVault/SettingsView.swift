@@ -243,7 +243,9 @@ struct GeneralTab: View {
                     }
                 }
                 HStack {
-                    TextField("例如 com.apple.keychainaccess", text: $model.newExcluded)
+                    // In a grouped Form the title becomes a side label; use a prompt so it is a placeholder.
+                    TextField("Bundle ID", text: $model.newExcluded, prompt: Text("例如 com.apple.keychainaccess"))
+                        .labelsHidden()
                     Menu("从运行中的 App 选择") {
                         ForEach(runningApps, id: \.0) { app in
                             TrackedButton(app.1, tracker: model.tracker, key: "settings.excluded.add", name: "settings.excluded.add_running", detail: app.0) {
@@ -251,6 +253,7 @@ struct GeneralTab: View {
                             }
                         }
                     }
+                    .fixedSize()
                     TrackedButton("添加", tracker: model.tracker, key: "settings.excluded.add", name: "settings.excluded.add") {
                         try await model.addExcluded(model.newExcluded); model.newExcluded = ""
                     }

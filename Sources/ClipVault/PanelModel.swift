@@ -238,6 +238,9 @@ final class PanelModel {
         }
     }
 
+    /// Snapshot evidence only (SnapshotRunner): set what the flagsChanged monitor would set while ⌘ is held.
+    func overrideCommandKey(_ down: Bool) { commandDown = down }
+
     private func stopWatchingCommandKey() {
         if let m = flagsMonitor { NSEvent.removeMonitor(m) }
         flagsMonitor = nil
