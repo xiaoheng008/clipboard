@@ -459,6 +459,7 @@ struct ModelsTab: View {
         case .downloading: return String(format: "下载中 %.0f%% · ", p.fraction * 100) + "\(mb(p.bytesDone)) / \(mb(p.bytesTotal)) MB"
         case .verifying: return "校验中…"
         case .compiling: return "编译模型中…"
+        case .optimizing: return "首次优化模型（约 1 分钟，仅一次）…"
         case .done: return "完成"
         }
     }

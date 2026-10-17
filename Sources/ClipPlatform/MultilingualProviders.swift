@@ -11,8 +11,18 @@ enum CoreMLSupport {
             throw ProviderError.modelUnavailable(manifest.id)
         }
         let config = MLModelConfiguration()
-        config.computeUnits = .cpuAndNeuralEngine     // GPU path is much slower for these graphs (model cards)
+        config.computeUnits = computeUnits(manifest.computeUnits)
         return try MLModel(contentsOf: ModelPaths.directory(home: home, id: manifest.id).appendingPathComponent(dir), configuration: config)
+    }
+
+    /// Manifest value → MLComputeUnits. Default Neural Engine (e5 / Qwen3 cards: GPU path is much slower).
+    static func computeUnits(_ s: String?) -> MLComputeUnits {
+        switch s {
+        case "cpuAndGPU": .cpuAndGPU
+        case "all": .all
+        case "cpuOnly": .cpuOnly
+        default: .cpuAndNeuralEngine
+        }
     }
 
     static func tokenizer(_ manifest: ModelManifest, home: AppHome) throws -> HFTokenizer {
@@ -107,8 +117,10 @@ public final class CoreMLTextEmbeddingProvider: EmbeddingProvider, @unchecked Se
     public let dimension: Int
     public let capabilities = EmbeddingCapabilities(image: false, text: true)
     private let manifest: ModelManifest
-    private let model: MLModel
     private let tokenizer: HFTokenizer
+    /// (package, model): one entry for single-package models with enumerated lengths, several for
+    /// fixed-length packages (Qwen3 128 / 512).
+    private let packages: [(TextPackage, MLModel)]
     private let lengths: [Int]
     private let lock = NSLock()
 
@@ -116,9 +128,20 @@ public final class CoreMLTextEmbeddingProvider: EmbeddingProvider, @unchecked Se
         self.manifest = manifest
         modelID = manifest.id
         dimension = manifest.dim
-        model = try CoreMLSupport.load(manifest, home: home, role: "text")
         tokenizer = try CoreMLSupport.tokenizer(manifest, home: home)
-        lengths = (manifest.inputLengths ?? [512]).sorted()
+        if let pkgs = manifest.textPackages, !pkgs.isEmpty {
+            packages = try pkgs.sorted { $0.length < $1.length }.map { ($0, try CoreMLSupport.load(manifest, home: home, role: $0.role)) }
+            lengths = []
+        } else {
+            packages = [(TextPackage(role: "text", length: 0), try CoreMLSupport.load(manifest, home: home, role: "text"))]
+            lengths = (manifest.inputLengths ?? [512]).sorted()
+        }
+    }
+
+    /// Smallest fixed-length package that holds `tokens`; the largest when none does (input truncated).
+    static func choose(_ packages: [TextPackage], tokens: Int) -> TextPackage? {
+        let sorted = packages.sorted { $0.length < $1.length }
+        return sorted.first { $0.length >= tokens } ?? sorted.last
     }
 
     public func embed(imageAt url: URL) async throws -> [Float] { throw ProviderError.unsupported("images") }
@@ -126,9 +149,15 @@ public final class CoreMLTextEmbeddingProvider: EmbeddingProvider, @unchecked Se
     public func embed(document: String) async throws -> [Float] { try encode((manifest.documentPrefix ?? "") + document) }
 
     private func encode(_ text: String) throws -> [Float] {
-        let maxLen = lengths.last ?? 512
         let full = tokenizer.encode(text)
-        let length = lengths.first { $0 >= full.count } ?? maxLen
+        let model: MLModel
+        let length: Int
+        if lengths.isEmpty, let pkg = Self.choose(packages.map(\.0), tokens: full.count),
+           let chosen = packages.first(where: { $0.0 == pkg }) {
+            model = chosen.1; length = pkg.length
+        } else {
+            model = packages[0].1; length = lengths.first { $0 >= full.count } ?? (lengths.last ?? 512)
+        }
         let left = manifest.padLeft ?? false
         let ids = tokenizer.contextIDs(text, length: length, padID: manifest.padID ?? 1, padLeft: left)   // truncates keeping the end token (H10)
         let real = min(full.count, length)

@@ -276,7 +276,7 @@ enum BuiltinModels {
   {
    "id": "multilingual-e5-small@1",
    "family": "coreml-text-embed",
-   "displayName": "Multilingual E5 Small（中英文文本语义）",
+   "displayName": "Multilingual E5 Small（中文搜英文较弱）",
    "tier": 1,
    "dim": 384,
    "minMemoryGB": 0,
@@ -326,6 +326,134 @@ enum BuiltinModels {
     }
    ],
    "notes": "intfloat/multilingual-e5-small (MIT), Core ML conversion by wolfram-pro. Pooling + L2 norm inside the graph."
+  },
+  {
+   "id": "qwen3-embedding-0.6b@1",
+   "family": "coreml-text-embed",
+   "displayName": "Qwen3 Embedding 0.6B（中英文文本语义，推荐）",
+   "tier": 4,
+   "dim": 1024,
+   "minMemoryGB": 16,
+   "textInput": "input_ids",
+   "attentionMaskInput": "attention_mask",
+   "output": "embedding",
+   "textPackages": [
+    {
+     "role": "text",
+     "length": 128
+    },
+    {
+     "role": "text512",
+     "length": 512
+    }
+   ],
+   "padID": 151643,
+   "padLeft": true,
+   "queryPrefix": "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery:",
+   "documentPrefix": "",
+   "tokenizer": "hf",
+   "tokenizerFile": "tokenizer.json",
+   "multilingual": true,
+   "scoreFloor": 0.45,
+   "scoreMargin": 0.08,
+   "files": [
+    {
+     "path": "text.mlpackage/Manifest.json",
+     "url": "https://huggingface.co/erjigit17/qwen3-embedding-0.6b-ane-coreml-8bit/resolve/main/qwen3-b1_s128-8bit.mlpackage/Manifest.json",
+     "sha256": "455eb2d5806f118b51fab989fbb6d3057757024bbd4168996b150a939602dd31",
+     "size": 617
+    },
+    {
+     "path": "text.mlpackage/Data/com.apple.CoreML/model.mlmodel",
+     "url": "https://huggingface.co/erjigit17/qwen3-embedding-0.6b-ane-coreml-8bit/resolve/main/qwen3-b1_s128-8bit.mlpackage/Data/com.apple.CoreML/model.mlmodel",
+     "sha256": "7d24aa9fc46fcea3d17af383e316ee119a2187606c1c6c39039edbc4cbcf0094",
+     "size": 645191
+    },
+    {
+     "path": "text.mlpackage/Data/com.apple.CoreML/weights/weight.bin",
+     "url": "https://huggingface.co/erjigit17/qwen3-embedding-0.6b-ane-coreml-8bit/resolve/main/qwen3-b1_s128-8bit.mlpackage/Data/com.apple.CoreML/weights/weight.bin",
+     "sha256": "a27e83e63117af006e601b36955c7539a2b5e4f8ab2984691f8845dcec4a16a0",
+     "size": 596927872
+    },
+    {
+     "path": "text512.mlpackage/Manifest.json",
+     "url": "https://huggingface.co/erjigit17/qwen3-embedding-0.6b-ane-coreml-8bit/resolve/main/qwen3-b1_s512-8bit.mlpackage/Manifest.json",
+     "sha256": "32cf218afcb9305ef53e9f623c79902e6f99fa110a49d736063db905a2e11346",
+     "size": 617
+    },
+    {
+     "path": "text512.mlpackage/Data/com.apple.CoreML/model.mlmodel",
+     "url": "https://huggingface.co/erjigit17/qwen3-embedding-0.6b-ane-coreml-8bit/resolve/main/qwen3-b1_s512-8bit.mlpackage/Data/com.apple.CoreML/model.mlmodel",
+     "sha256": "e1dc3cf755da81ddf2cb30a9b83c4a815c4a35133a3a8e6a1bb56dc80977d5be",
+     "size": 645191
+    },
+    {
+     "path": "text512.mlpackage/Data/com.apple.CoreML/weights/weight.bin",
+     "url": "https://huggingface.co/erjigit17/qwen3-embedding-0.6b-ane-coreml-8bit/resolve/main/qwen3-b1_s512-8bit.mlpackage/Data/com.apple.CoreML/weights/weight.bin",
+     "sha256": "f8eb20de1b1e94349277b98b211e4969e4310fbf10e1a1f547a1b6981cbcf9d4",
+     "size": 597271936
+    },
+    {
+     "path": "tokenizer.json",
+     "url": "https://huggingface.co/erjigit17/qwen3-embedding-0.6b-ane-coreml-8bit/resolve/main/tokenizer.json",
+     "sha256": "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a",
+     "size": 11423705
+    }
+   ],
+   "notes": "Qwen/Qwen3-Embedding-0.6B (Apache-2.0); Core ML by neuradex, 8-bit by erjigit17. Last-token pooling in the graph."
+  },
+  {
+   "id": "granite-embedding-97m@1",
+   "family": "coreml-text-embed",
+   "displayName": "Granite Embedding 97M（轻量，中英文）",
+   "tier": 2,
+   "dim": 384,
+   "minMemoryGB": 0,
+   "textInput": "input_ids",
+   "attentionMaskInput": "attention_mask",
+   "output": "embedding",
+   "inputLengths": [
+    16,
+    32,
+    64,
+    128,
+    256,
+    512
+   ],
+   "padID": 179935,
+   "computeUnits": "cpuOnly",
+   "tokenizer": "hf",
+   "tokenizerFile": "tokenizer.json",
+   "multilingual": true,
+   "scoreFloor": 0.83,
+   "scoreMargin": 0.03,
+   "files": [
+    {
+     "path": "text.mlpackage/Manifest.json",
+     "url": "https://huggingface.co/characteragent/granite-embedding-97m-multilingual-r2-coreml/resolve/main/GraniteEmbedding97mMultilingualR2.mlpackage/Manifest.json",
+     "sha256": "4b1d83a52239e83bed576458e8d3e1ba4aa303385c619e825ebd62f1ff065032",
+     "size": 617
+    },
+    {
+     "path": "text.mlpackage/Data/com.apple.CoreML/model.mlmodel",
+     "url": "https://huggingface.co/characteragent/granite-embedding-97m-multilingual-r2-coreml/resolve/main/GraniteEmbedding97mMultilingualR2.mlpackage/Data/com.apple.CoreML/model.mlmodel",
+     "sha256": "c0553e1cd2455ac6c5196d8658768dcc9e77ced18cf5c847e002af6951b125a7",
+     "size": 172838
+    },
+    {
+     "path": "text.mlpackage/Data/com.apple.CoreML/weights/weight.bin",
+     "url": "https://huggingface.co/characteragent/granite-embedding-97m-multilingual-r2-coreml/resolve/main/GraniteEmbedding97mMultilingualR2.mlpackage/Data/com.apple.CoreML/weights/weight.bin",
+     "sha256": "a9ff4dce357172570f18de7062b2a06f88d6b9b439f38d99ae110af36a810b1c",
+     "size": 98079232
+    },
+    {
+     "path": "tokenizer.json",
+     "url": "https://huggingface.co/ibm-granite/granite-embedding-97m-multilingual-r2/resolve/main/tokenizer.json",
+     "sha256": "4f2842d568e2724370aec203652a42ac783c7937f8347a1a2cc7506d71f1582f",
+     "size": 25301672
+    }
+   ],
+   "notes": "ibm-granite/granite-embedding-97m-multilingual-r2 (Apache-2.0), Core ML int8 by characteragent."
   },
   {
    "id": "vision-featureprint@1",

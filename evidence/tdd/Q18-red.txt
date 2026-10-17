@@ -1,0 +1,3 @@
+Tests/ClipPlatformTests/PlatformTests.swift failed with a nonzero exit code. Command line:     cd /Users/xiaoheng/Program/app
+Tests/ClipPlatformTests/PlatformTests.swift:272:25: [1;31merror: [1;39mcannot find 'TextPackage' in scope[0;0m
+Tests/ClipPlatformTests/PlatformTests.swift:272:68: [1;31merror: [1;39mcannot find 'TextPackage' in scope[0;0m

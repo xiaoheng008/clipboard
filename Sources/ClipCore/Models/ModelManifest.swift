@@ -13,6 +13,13 @@ public struct ModelFile: Codable, Sendable, Equatable {
     }
 }
 
+/// One fixed-length Core ML package of a text model (e.g. Qwen3: 128 and 512 tokens), Q18.
+public struct TextPackage: Codable, Sendable, Equatable {
+    public var role: String        // package directory name without ".mlpackage"
+    public var length: Int         // fixed input length
+    public init(role: String, length: Int) { self.role = role; self.length = length }
+}
+
 public struct ModelManifest: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     public var family: String
@@ -32,6 +39,10 @@ public struct ModelManifest: Codable, Sendable, Equatable, Identifiable {
     public var textLength: Int?          // fixed text context (SigLIP2: 64)
     public var padID: Int?
     public var padLeft: Bool?            // last-token-pooling models (Qwen3) expect left padding
+    public var textPackages: [TextPackage]?   // several fixed-length packages, chosen by token count (Q18)
+    /// "cpuAndNeuralEngine" (default) | "cpuAndGPU" | "all" | "cpuOnly". Measured per model: Granite's
+    /// Neural Engine program is not cached (≈ 30 s on every load) while GPU loads in < 1 s.
+    public var computeUnits: String?
     public var lowercase: Bool?
     public var imageMean: [Float]?
     public var imageStd: [Float]?

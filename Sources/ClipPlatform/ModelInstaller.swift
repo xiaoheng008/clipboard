@@ -4,7 +4,7 @@ import CryptoKit
 import Foundation
 
 public struct InstallProgress: Sendable, Equatable {
-    public enum Phase: String, Sendable { case downloading, verifying, compiling, done }
+    public enum Phase: String, Sendable { case downloading, verifying, compiling, optimizing, done }
     public var modelID: String
     public var bytesDone: Int64
     public var bytesTotal: Int64
@@ -85,7 +85,7 @@ public actor ModelInstaller {
             try Task.checkCancellation()
             progress?(InstallProgress(modelID: m.id, bytesDone: total, bytesTotal: total, phase: .compiling))
             var compiled: [String: String] = [:]
-            for role in ["image", "text"] {
+            for role in Self.packageRoles(in: m.files.map(\.path)) {
                 let pkg = staging.appendingPathComponent("\(role).mlpackage")
                 guard fm.fileExists(atPath: pkg.path) else { continue }
                 let out = try await MLModel.compileModel(at: pkg)
@@ -102,6 +102,18 @@ public actor ModelInstaller {
             let final = try ModelPaths.safeDirectory(home: home, id: m.id)
             if fm.fileExists(atPath: final.path) { try fm.removeItem(at: final) }
             try fm.moveItem(at: staging, to: final)
+            // 4. First load in its final location: the system builds and caches the Neural Engine program
+            //    (measured: Qwen3 72 s the first time, < 1 s afterwards), so activation later stays fast and
+            //    within its 60 s deadline. Failure here does not undo the install; activation retries it.
+            progress?(InstallProgress(modelID: m.id, bytesDone: total, bytesTotal: total, phase: .optimizing))
+            let warmStart = Date()
+            let config = MLModelConfiguration()
+            config.computeUnits = CoreMLSupport.computeUnits(m.computeUnits)
+            for name in compiled.values.sorted() {
+                try Task.checkCancellation()
+                _ = try? MLModel(contentsOf: final.appendingPathComponent(name), configuration: config)
+            }
+            Log.shared.event("model.warmed", ["model": .label(m.id), "ms": .int(Int64(Date().timeIntervalSince(warmStart) * 1000))])
             progress?(InstallProgress(modelID: m.id, bytesDone: total, bytesTotal: total, phase: .done))
             Log.shared.event("model.installed", ["model": .label(m.id), "bytes": .int(total)])
         } catch {
@@ -127,6 +139,14 @@ public actor ModelInstaller {
             guard fm.fileExists(atPath: dir.path, isDirectory: &isDir), isDir.boolValue else { continue }
             if !fm.fileExists(atPath: dir.appendingPathComponent("install.json").path) { try? fm.removeItem(at: dir) }
         }
+    }
+
+    /// Every top-level "<role>.mlpackage/…" in the manifest (image, text, text512, …), sorted.
+    public static func packageRoles(in paths: [String]) -> [String] {
+        Array(Set(paths.compactMap { p -> String? in
+            guard let first = p.split(separator: "/").first, first.hasSuffix(".mlpackage") else { return nil }
+            return String(first.dropLast(".mlpackage".count))
+        })).sorted()
     }
 
     /// Pure check, exposed for tests (AC9.3).

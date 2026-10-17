@@ -230,7 +230,7 @@ struct MobileCLIPIntegrationTests {
         #expect(zip(ps, ps.dropFirst()).allSatisfy { $0.bytesDone <= $1.bytesDone })
         #expect(ps.last?.bytesDone == m.downloadBytes && ps.last?.phase == .done)
         let phases = ps.map(\.phase).reduce(into: [InstallProgress.Phase]()) { if $0.last != $1 { $0.append($1) } }
-        #expect(phases == [.downloading, .verifying, .compiling, .done])
+        #expect(phases == [.downloading, .verifying, .compiling, .optimizing, .done])
         #expect(ps.allSatisfy { $0.fraction >= 0 && $0.fraction <= 1 })
     }
 
@@ -263,5 +263,23 @@ struct MobileCLIPIntegrationTests {
                                                 sha256: try ModelInstaller.sha256(of: src), size: 5)], notes: nil)
         try await ModelInstaller(home: home).install(m)
         #expect(ModelPaths.isInstalled(home: home, model: m))
+    }
+}
+
+@Suite struct LengthPackageTests {
+    // Q18: short texts use the smallest package that fits; longer ones the next; overflow → largest (truncated).
+    @Test func choosesSmallestFittingPackage() {
+        let packages = [TextPackage(role: "text512", length: 512), TextPackage(role: "text", length: 128)]
+        #expect(CoreMLTextEmbeddingProvider.choose(packages, tokens: 20)?.role == "text")
+        #expect(CoreMLTextEmbeddingProvider.choose(packages, tokens: 128)?.role == "text")
+        #expect(CoreMLTextEmbeddingProvider.choose(packages, tokens: 129)?.role == "text512")
+        #expect(CoreMLTextEmbeddingProvider.choose(packages, tokens: 5000)?.role == "text512")
+        #expect(CoreMLTextEmbeddingProvider.choose([], tokens: 5) == nil)
+    }
+
+    // The installer compiles every top-level .mlpackage, not only "image" / "text".
+    @Test func installerCompilesEveryPackageRole() throws {
+        #expect(ModelInstaller.packageRoles(in: ["text.mlpackage/Manifest.json", "text512.mlpackage/Data/x", "tokenizer.json", "image.mlpackage/Manifest.json"])
+                == ["image", "text", "text512"])
     }
 }

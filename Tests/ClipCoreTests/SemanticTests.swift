@@ -89,7 +89,9 @@ import Testing
 @Suite struct ModelManifestTests {
     @Test func builtinCatalogDecodesAndIsComplete() throws {
         let catalog = try ModelCatalog.builtin()
-        #expect(catalog.models.map(\.id) == ["mobileclip-s0@1", "mobileclip-s2@1", "mobileclip-blt@1", "siglip2-base@1", "multilingual-e5-small@1", "vision-featureprint@1"])
+        #expect(catalog.models.map(\.id) == ["mobileclip-s0@1", "mobileclip-s2@1", "mobileclip-blt@1", "siglip2-base@1", "multilingual-e5-small@1", "qwen3-embedding-0.6b@1", "granite-embedding-97m@1", "vision-featureprint@1"])
+        #expect(catalog.model(id: "qwen3-embedding-0.6b@1")?.textPackages?.map(\.length) == [128, 512])
+        #expect(catalog.model(id: "qwen3-embedding-0.6b@1")?.files.count == 7)
         #expect(catalog.model(id: "siglip2-base@1")?.files.count == 7)
         #expect(catalog.model(id: "multilingual-e5-small@1")?.slot == .text)
         for m in catalog.models where m.family == "coreml-clip" {
@@ -114,7 +116,7 @@ import Testing
         let merged = try ModelCatalog.builtin().merging(customJSON: Data(custom.utf8))
         #expect(merged.model(id: "my-clip@1")?.dim == 768)
         #expect(merged.model(id: "weird@1")?.isSupportedFamily == false)
-        #expect(merged.models.count == 8)
+        #expect(merged.models.count == 10)
     }
 }
 

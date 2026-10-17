@@ -36,6 +36,8 @@ public enum TextEval {
         var perType: [String: (n: Int, top1: Int, top3: Int, rr: Double)] = [:]
         var latencies: [Double] = []
         var gaps: [Float] = []
+        var correctScores: [Float] = []
+        var bestWrongScores: [Float] = []
         for q in dataset.queries {
             let tq = Date()
             let res = await rt.service.engine(.text).search(q.query, k: dataset.docs.count)
@@ -44,6 +46,7 @@ public enum TextEval {
             let rank = (ranked.firstIndex { q.relevant.contains($0.0) } ?? ranked.count) + 1
             if let best = ranked.first(where: { q.relevant.contains($0.0) })?.1, let wrong = ranked.first(where: { !q.relevant.contains($0.0) })?.1 {
                 gaps.append(best - wrong)
+                correctScores.append(best); bestWrongScores.append(wrong)
             }
             var p = perType[q.type, default: (0, 0, 0, 0)]
             p.n += 1; if rank == 1 { p.top1 += 1 }; if rank <= 3 { p.top3 += 1 }; p.rr += 1 / Double(rank)
@@ -58,6 +61,11 @@ public enum TextEval {
                               modelID, r.top1 * 100, r.top3 * 100, r.mrr, latencies[latencies.count / 2],
                               latencies[min(latencies.count - 1, Int(Double(latencies.count) * 0.95))],
                               gaps.isEmpty ? 0 : gaps.reduce(0, +) / Float(gaps.count)), at: 0)
+        // Score distribution, for calibrating the default floor / margin (H5).
+        func pct(_ xs: [Float], _ p: Double) -> Float { let s = xs.sorted(); return s.isEmpty ? .nan : s[min(s.count - 1, Int(Double(s.count) * p))] }
+        r.lines.insert(String(format: "  scores: correct p10 %.3f p50 %.3f min %.3f | best-wrong p50 %.3f p90 %.3f max %.3f",
+                              pct(correctScores, 0.1), pct(correctScores, 0.5), correctScores.min() ?? .nan,
+                              pct(bestWrongScores, 0.5), pct(bestWrongScores, 0.9), bestWrongScores.max() ?? .nan), at: 1)
         for (t, p) in perType.sorted(by: { $0.key < $1.key }) {
             r.lines.insert(String(format: "  %@: top1 %d/%d  top3 %d/%d  MRR %.3f", t, p.top1, p.n, p.top3, p.n, p.rr / Double(p.n)), at: 1)
         }

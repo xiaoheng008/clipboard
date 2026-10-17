@@ -181,7 +181,9 @@ final class FakeWriter: PasteboardWriting, @unchecked Sendable {
         let c = try ModelCatalog.builtin()
         #expect(c.recommended(memoryGB: 32, slot: .image)?.id == "siglip2-base@1")
         #expect(c.recommended(memoryGB: 4, slot: .image)?.id == "mobileclip-s0@1")
-        #expect(c.recommended(memoryGB: 32, slot: .text)?.id == "multilingual-e5-small@1")
+        // Q18: Qwen3 where it fits (≥ 16 GB), Granite below.
+        #expect(c.recommended(memoryGB: 32, slot: .text)?.id == "qwen3-embedding-0.6b@1")
+        #expect(c.recommended(memoryGB: 8, slot: .text)?.id == "granite-embedding-97m@1")
     }
 }
 

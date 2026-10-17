@@ -86,12 +86,51 @@ e5_files = [{"path": f"text.mlpackage/{f}", "url": f"{E5}/MultilingualE5Small.ml
     ("Data/com.apple.CoreML/model.mlmodel", 283336, "121f9988a394565994f5aa26cd8a86a7d32b76e0e5b986ecee07070e5b2f8b27"),
     ("Data/com.apple.CoreML/weights/weight.bin", 235028736, "ff0331d7b3e44efd122d3592caf82a09e1d88a0bbd458fc8a24223ebb14a3ba7")]]
 e5_files.append({"path": "tokenizer.json", "url": f"{E5}/tokenizer.json", "sha256": "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39", "size": 17082730})
-models.append({"id": "multilingual-e5-small@1", "family": "coreml-text-embed", "displayName": "Multilingual E5 Small（中英文文本语义）",
+models.append({"id": "multilingual-e5-small@1", "family": "coreml-text-embed", "displayName": "Multilingual E5 Small（中文搜英文较弱）",
                "tier": 1, "dim": 384, "minMemoryGB": 0, "textInput": "input_ids", "attentionMaskInput": "attention_mask", "output": "embedding",
                "inputLengths": [16, 32, 64, 128, 256, 512], "padID": 1, "queryPrefix": "query: ", "documentPrefix": "passage: ",
                "tokenizer": "hf", "tokenizerFile": "tokenizer.json", "multilingual": True, "scoreFloor": 0.84, "scoreMargin": 0.012,
                "files": e5_files,
                "notes": "intfloat/multilingual-e5-small (MIT), Core ML conversion by wolfram-pro. Pooling + L2 norm inside the graph."})
+
+
+# Text models chosen by the zh/en eval (2026-10-17, Q18; evidence/7B/text-model-eval-v1.txt).
+QW = "https://huggingface.co/erjigit17/qwen3-embedding-0.6b-ane-coreml-8bit/resolve/main"
+qw_files = []
+for role, pkg, rows in [
+    ("text", "qwen3-b1_s128-8bit.mlpackage", [("Manifest.json", 617, "455eb2d5806f118b51fab989fbb6d3057757024bbd4168996b150a939602dd31"),
+        ("Data/com.apple.CoreML/model.mlmodel", 645191, "7d24aa9fc46fcea3d17af383e316ee119a2187606c1c6c39039edbc4cbcf0094"),
+        ("Data/com.apple.CoreML/weights/weight.bin", 596927872, "a27e83e63117af006e601b36955c7539a2b5e4f8ab2984691f8845dcec4a16a0")]),
+    ("text512", "qwen3-b1_s512-8bit.mlpackage", [("Manifest.json", 617, "32cf218afcb9305ef53e9f623c79902e6f99fa110a49d736063db905a2e11346"),
+        ("Data/com.apple.CoreML/model.mlmodel", 645191, "e1dc3cf755da81ddf2cb30a9b83c4a815c4a35133a3a8e6a1bb56dc80977d5be"),
+        ("Data/com.apple.CoreML/weights/weight.bin", 597271936, "f8eb20de1b1e94349277b98b211e4969e4310fbf10e1a1f547a1b6981cbcf9d4")])]:
+    for f, n, h in rows:
+        qw_files.append({"path": f"{role}.mlpackage/{f}", "url": f"{QW}/{pkg}/{f}", "sha256": h, "size": n})
+qw_files.append({"path": "tokenizer.json", "url": f"{QW}/tokenizer.json", "sha256": "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a", "size": 11423705})
+models.append({"id": "qwen3-embedding-0.6b@1", "family": "coreml-text-embed", "displayName": "Qwen3 Embedding 0.6B（中英文文本语义，推荐）",
+               "tier": 4, "dim": 1024, "minMemoryGB": 16, "textInput": "input_ids", "attentionMaskInput": "attention_mask", "output": "embedding",
+               "textPackages": [{"role": "text", "length": 128}, {"role": "text512", "length": 512}], "padID": 151643, "padLeft": True,
+               "queryPrefix": "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery:", "documentPrefix": "",
+               "tokenizer": "hf", "tokenizerFile": "tokenizer.json", "multilingual": True, "scoreFloor": 0.45, "scoreMargin": 0.08,
+               "files": qw_files,
+               "notes": "Qwen/Qwen3-Embedding-0.6B (Apache-2.0); Core ML by neuradex, 8-bit by erjigit17. Last-token pooling in the graph."})
+
+GR = "https://huggingface.co/characteragent/granite-embedding-97m-multilingual-r2-coreml/resolve/main/GraniteEmbedding97mMultilingualR2.mlpackage"
+gr_files = [{"path": f"text.mlpackage/{f}", "url": f"{GR}/{f}", "sha256": h, "size": n} for f, n, h in [
+    ("Manifest.json", 617, "4b1d83a52239e83bed576458e8d3e1ba4aa303385c619e825ebd62f1ff065032"),
+    ("Data/com.apple.CoreML/model.mlmodel", 172838, "c0553e1cd2455ac6c5196d8658768dcc9e77ced18cf5c847e002af6951b125a7"),
+    ("Data/com.apple.CoreML/weights/weight.bin", 98079232, "a9ff4dce357172570f18de7062b2a06f88d6b9b439f38d99ae110af36a810b1c")]]
+gr_files.append({"path": "tokenizer.json", "url": "https://huggingface.co/ibm-granite/granite-embedding-97m-multilingual-r2/resolve/main/tokenizer.json",
+                 "sha256": "4f2842d568e2724370aec203652a42ac783c7937f8347a1a2cc7506d71f1582f", "size": 25301672})
+models.append({"id": "granite-embedding-97m@1", "family": "coreml-text-embed", "displayName": "Granite Embedding 97M（轻量，中英文）",
+               "tier": 2, "dim": 384, "minMemoryGB": 0, "textInput": "input_ids", "attentionMaskInput": "attention_mask", "output": "embedding",
+               "inputLengths": [16, 32, 64, 128, 256, 512], "padID": 179935,
+               # Measured 2026-10-17 (M4): Neural Engine ≈ 30 s on every load (not cached); CPU 1.3 s load,
+               # 3 ms / query, 5 ms / document — fastest for this small int8 model.
+               "computeUnits": "cpuOnly",
+               "tokenizer": "hf", "tokenizerFile": "tokenizer.json", "multilingual": True, "scoreFloor": 0.83, "scoreMargin": 0.03,
+               "files": gr_files,
+               "notes": "ibm-granite/granite-embedding-97m-multilingual-r2 (Apache-2.0), Core ML int8 by characteragent."})
 
 models.append({"id": "vision-featureprint@1", "family": "vision-featureprint", "displayName": "Apple Vision 特征（无需下载，仅相似图片）",
                "tier": 0, "dim": 768, "minMemoryGB": 0, "files": [],
