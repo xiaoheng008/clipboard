@@ -325,7 +325,12 @@ final class PanelModel {
         debounce?.cancel()
     }
 
+    /// Bumped on every open; the view moves keyboard focus to the search field when it changes.
+    /// (The hosting view survives hide/show, so `.onAppear` alone only focuses the first time.)
+    private(set) var focusToken = 0
+
     func panelDidOpen() {
+        focusToken += 1
         startWatchingCommandKey()
         query = ""
         kind = .all

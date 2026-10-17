@@ -64,6 +64,10 @@ struct PanelView: View {
         .frame(minWidth: 720, minHeight: 440)
         .background(.regularMaterial)
         .onAppear { searchFocused = true }
+        .onChange(of: model.focusToken) { _, _ in
+            // Next runloop turn: the panel has just become key.
+            DispatchQueue.main.async { searchFocused = true }
+        }
         .onKeyPress(.downArrow) { model.moveSelection(1); return .handled }
         .onKeyPress(.upArrow) { model.moveSelection(-1); return .handled }
         .onKeyPress(.return) { model.copySelected(via: "enter"); return .handled }

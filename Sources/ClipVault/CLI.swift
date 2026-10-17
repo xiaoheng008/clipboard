@@ -25,6 +25,7 @@ enum CLI {
       --bench [--items N] [--images N] [--dim N]   synthetic benchmark in a temporary home
       --login-item status | on | off     launch at login (off by default)
       --slow-ops [--limit N]             slowest button / shortcut actions (1000 kept)
+      --eval-text <dataset.json> --model <id>   text-model retrieval eval in a fresh temporary home
       --export-logs <dir>
       --version | --help
 
@@ -225,6 +226,22 @@ enum CLI {
             let r = try await Bench.run(home: home, items: items, images: images, dim: dim) { print($0) }
             print(r.budgetsMet ? "ALL BUDGETS MET" : "SOME BUDGETS MISSED")
             return r.budgetsMet ? 0 : 1
+
+        case "--eval-text":
+            let pos = try check(rest, valued: ["--model"], positional: 1)
+            guard let file = pos.first, let modelID = try option(rest, "--model") else { throw CLIError.usage("--eval-text <dataset.json> --model <id>") }
+            let dataset = try JSONDecoder().decode(TextEval.Dataset.self, from: Data(contentsOf: URL(fileURLWithPath: file)))
+            // Models come from the real home (installed there); data goes to a throwaway home.
+            let realHome = try AppHome.resolve()
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("clipvault-eval-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: root) }
+            let home = try AppHome(root: root)
+            try? FileManager.default.removeItem(at: home.modelsURL)
+            try FileManager.default.createSymbolicLink(at: home.modelsURL, withDestinationURL: realHome.modelsURL)
+            let rt = try await Runtime.open(home: home, services: .system(home: home), startWorker: false, sweepTmp: false)
+            let r = try await TextEval.run(rt, dataset: dataset, modelID: modelID) { print($0) }
+            r.lines.forEach { print($0) }
+            return 0
 
         case "--slow-ops":
             _ = try check(rest, valued: ["--limit"])
