@@ -1,0 +1,483 @@
+{
+ "name": "clipvault text zh/en eval v1",
+ "created": "2026-10-17",
+ "docs": [
+  {
+   "id": "z1",
+   "text": "明天下午三点在三楼会议室开项目周会，记得带上季度报告"
+  },
+  {
+   "id": "z2",
+   "text": "服务器报错了，订单接口一直返回 500"
+  },
+  {
+   "id": "z3",
+   "text": "下班记得去超市买牛奶、鸡蛋和面包"
+  },
+  {
+   "id": "z4",
+   "text": "我的护照放在书房抽屉里的蓝色文件夹"
+  },
+  {
+   "id": "z5",
+   "text": "周末一起去爬香山吧，天气预报说是晴天"
+  },
+  {
+   "id": "z6",
+   "text": "这个排序函数的时间复杂度是 O(n log n)"
+  },
+  {
+   "id": "z7",
+   "text": "妈妈的生日是十月二十号，记得提前订蛋糕"
+  },
+  {
+   "id": "z8",
+   "text": "发票抬头写公司全称，税号 91110108MA01"
+  },
+  {
+   "id": "z9",
+   "text": "新同事下周一入职，需要提前开通邮箱和门禁卡"
+  },
+  {
+   "id": "z10",
+   "text": "房租每个月五号前转给房东，备注房间号"
+  },
+  {
+   "id": "z11",
+   "text": "牙医预约改到下周三上午十点"
+  },
+  {
+   "id": "z12",
+   "text": "数据库连接池满了，导致请求超时"
+  },
+  {
+   "id": "z13",
+   "text": "孩子的家长会在周五晚上七点"
+  },
+  {
+   "id": "z14",
+   "text": "信用卡账单还款日是每月 18 号"
+  },
+  {
+   "id": "z15",
+   "text": "把客厅的灯换成暖色光，卧室用冷色光"
+  },
+  {
+   "id": "z16",
+   "text": "高铁票已经买好，G101 早上八点从北京南站出发"
+  },
+  {
+   "id": "z17",
+   "text": "年假还剩五天，打算国庆后去云南"
+  },
+  {
+   "id": "z18",
+   "text": "猫粮快吃完了，记得在网上下单"
+  },
+  {
+   "id": "z19",
+   "text": "代码合并前要先跑完单元测试"
+  },
+  {
+   "id": "z20",
+   "text": "体检报告显示血脂偏高，需要少吃油腻"
+  },
+  {
+   "id": "e1",
+   "text": "The quarterly business review is moved to Friday 10am in room Orion"
+  },
+  {
+   "id": "e2",
+   "text": "Production deploy failed because the database migration timed out"
+  },
+  {
+   "id": "e3",
+   "text": "Shopping list: apples, bananas, oat milk and coffee beans"
+  },
+  {
+   "id": "e4",
+   "text": "Flight CA1234 departs Beijing at 08:35 from gate 22"
+  },
+  {
+   "id": "e5",
+   "text": "Recipe: boil the pasta for nine minutes, then toss with garlic and olive oil"
+  },
+  {
+   "id": "e6",
+   "text": "Invoice #2026-0042: total amount due is $1,280.00 by November 15"
+  },
+  {
+   "id": "e7",
+   "text": "The API gateway returns HTTP 503 when the upstream service is down"
+  },
+  {
+   "id": "e8",
+   "text": "Remember to water the plants on the balcony every morning"
+  },
+  {
+   "id": "e9",
+   "text": "Password reset link expires in 30 minutes"
+  },
+  {
+   "id": "e10",
+   "text": "Book a table for four at the Italian restaurant on Saturday night"
+  },
+  {
+   "id": "e11",
+   "text": "The kids' soccer practice starts at 4pm on Wednesdays"
+  },
+  {
+   "id": "e12",
+   "text": "Renew the car insurance before the end of the month"
+  },
+  {
+   "id": "e13",
+   "text": "Use a binary search to find the element in the sorted array"
+  },
+  {
+   "id": "e14",
+   "text": "The hotel check-in time is 3pm and breakout is at noon"
+  },
+  {
+   "id": "e15",
+   "text": "Our dog needs his vaccination shot next Tuesday at the vet"
+  },
+  {
+   "id": "e16",
+   "text": "Quarterly revenue grew 12 percent compared with last year"
+  },
+  {
+   "id": "e17",
+   "text": "The printer on the second floor is out of toner"
+  },
+  {
+   "id": "e18",
+   "text": "Meet the client at the airport arrivals hall"
+  },
+  {
+   "id": "e19",
+   "text": "Set the thermostat to 22 degrees during the night"
+  },
+  {
+   "id": "e20",
+   "text": "Annual leave requests must be submitted two weeks in advance"
+  }
+ ],
+ "queries": [
+  {
+   "query": "航班几点起飞",
+   "relevant": [
+    "e4"
+   ],
+   "type": "zh→en"
+  },
+  {
+   "query": "意大利面怎么煮",
+   "relevant": [
+    "e5"
+   ],
+   "type": "zh→en"
+  },
+  {
+   "query": "这张发票要付多少钱",
+   "relevant": [
+    "e6"
+   ],
+   "type": "zh→en"
+  },
+  {
+   "query": "网关报 503 服务不可用",
+   "relevant": [
+    "e7"
+   ],
+   "type": "zh→en"
+  },
+  {
+   "query": "给阳台的花浇水",
+   "relevant": [
+    "e8"
+   ],
+   "type": "zh→en"
+  },
+  {
+   "query": "密码重置链接多久失效",
+   "relevant": [
+    "e9"
+   ],
+   "type": "zh→en"
+  },
+  {
+   "query": "周六晚上订餐厅",
+   "relevant": [
+    "e10"
+   ],
+   "type": "zh→en"
+  },
+  {
+   "query": "孩子踢足球训练",
+   "relevant": [
+    "e11"
+   ],
+   "type": "zh→en"
+  },
+  {
+   "query": "车险续保",
+   "relevant": [
+    "e12"
+   ],
+   "type": "zh→en"
+  },
+  {
+   "query": "有序数组二分查找",
+   "relevant": [
+    "e13"
+   ],
+   "type": "zh→en"
+  },
+  {
+   "query": "酒店几点入住",
+   "relevant": [
+    "e14"
+   ],
+   "type": "zh→en"
+  },
+  {
+   "query": "狗要打疫苗",
+   "relevant": [
+    "e15"
+   ],
+   "type": "zh→en"
+  },
+  {
+   "query": "营收同比增长",
+   "relevant": [
+    "e16"
+   ],
+   "type": "zh→en"
+  },
+  {
+   "query": "打印机没墨粉了",
+   "relevant": [
+    "e17"
+   ],
+   "type": "zh→en"
+  },
+  {
+   "query": "去机场接客户",
+   "relevant": [
+    "e18"
+   ],
+   "type": "zh→en"
+  },
+  {
+   "query": "when is the project weekly meeting",
+   "relevant": [
+    "z1"
+   ],
+   "type": "en→zh"
+  },
+  {
+   "query": "order API keeps returning 500 errors",
+   "relevant": [
+    "z2"
+   ],
+   "type": "en→zh"
+  },
+  {
+   "query": "buy milk and eggs after work",
+   "relevant": [
+    "z3"
+   ],
+   "type": "en→zh"
+  },
+  {
+   "query": "where is my passport",
+   "relevant": [
+    "z4"
+   ],
+   "type": "en→zh"
+  },
+  {
+   "query": "hiking this weekend",
+   "relevant": [
+    "z5"
+   ],
+   "type": "en→zh"
+  },
+  {
+   "query": "sorting algorithm time complexity",
+   "relevant": [
+    "z6"
+   ],
+   "type": "en→zh"
+  },
+  {
+   "query": "mom's birthday cake",
+   "relevant": [
+    "z7"
+   ],
+   "type": "en→zh"
+  },
+  {
+   "query": "onboarding a new colleague",
+   "relevant": [
+    "z9"
+   ],
+   "type": "en→zh"
+  },
+  {
+   "query": "pay the rent to the landlord",
+   "relevant": [
+    "z10"
+   ],
+   "type": "en→zh"
+  },
+  {
+   "query": "dentist appointment",
+   "relevant": [
+    "z11"
+   ],
+   "type": "en→zh"
+  },
+  {
+   "query": "connection pool exhausted causing timeouts",
+   "relevant": [
+    "z12"
+   ],
+   "type": "en→zh"
+  },
+  {
+   "query": "parent-teacher meeting",
+   "relevant": [
+    "z13"
+   ],
+   "type": "en→zh"
+  },
+  {
+   "query": "credit card payment due date",
+   "relevant": [
+    "z14"
+   ],
+   "type": "en→zh"
+  },
+  {
+   "query": "high-speed train ticket from Beijing",
+   "relevant": [
+    "z16"
+   ],
+   "type": "en→zh"
+  },
+  {
+   "query": "cat food is running out",
+   "relevant": [
+    "z18"
+   ],
+   "type": "en→zh"
+  },
+  {
+   "query": "会议什么时候开",
+   "relevant": [
+    "z1"
+   ],
+   "type": "zh→zh"
+  },
+  {
+   "query": "后端接口挂了",
+   "relevant": [
+    "z2"
+   ],
+   "type": "zh→zh"
+  },
+  {
+   "query": "购物清单",
+   "relevant": [
+    "z3"
+   ],
+   "type": "zh→zh"
+  },
+  {
+   "query": "护照在哪",
+   "relevant": [
+    "z4"
+   ],
+   "type": "zh→zh"
+  },
+  {
+   "query": "周末去哪里爬山",
+   "relevant": [
+    "z5"
+   ],
+   "type": "zh→zh"
+  },
+  {
+   "query": "算法复杂度",
+   "relevant": [
+    "z6"
+   ],
+   "type": "zh→zh"
+  },
+  {
+   "query": "开发票需要什么信息",
+   "relevant": [
+    "z8"
+   ],
+   "type": "zh→zh"
+  },
+  {
+   "query": "还信用卡",
+   "relevant": [
+    "z14"
+   ],
+   "type": "zh→zh"
+  },
+  {
+   "query": "灯光颜色怎么设置",
+   "relevant": [
+    "z15"
+   ],
+   "type": "zh→zh"
+  },
+  {
+   "query": "年假旅游计划",
+   "relevant": [
+    "z17"
+   ],
+   "type": "zh→zh"
+  },
+  {
+   "query": "提交代码前要做什么",
+   "relevant": [
+    "z19"
+   ],
+   "type": "zh→zh"
+  },
+  {
+   "query": "体检结果",
+   "relevant": [
+    "z20"
+   ],
+   "type": "zh→zh"
+  },
+  {
+   "query": "交房租",
+   "relevant": [
+    "z10"
+   ],
+   "type": "zh→zh"
+  },
+  {
+   "query": "看牙",
+   "relevant": [
+    "z11"
+   ],
+   "type": "zh→zh"
+  },
+  {
+   "query": "家长会时间",
+   "relevant": [
+    "z13"
+   ],
+   "type": "zh→zh"
+  }
+ ]
+}

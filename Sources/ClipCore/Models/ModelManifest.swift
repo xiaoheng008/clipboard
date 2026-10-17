@@ -31,6 +31,7 @@ public struct ModelManifest: Codable, Sendable, Equatable, Identifiable {
     // Optional fields (added 2026-10-17 for multilingual families; absent = family default).
     public var textLength: Int?          // fixed text context (SigLIP2: 64)
     public var padID: Int?
+    public var padLeft: Bool?            // last-token-pooling models (Qwen3) expect left padding
     public var lowercase: Bool?
     public var imageMean: [Float]?
     public var imageStd: [Float]?

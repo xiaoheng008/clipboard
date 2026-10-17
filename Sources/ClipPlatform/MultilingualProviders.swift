@@ -129,11 +129,12 @@ public final class CoreMLTextEmbeddingProvider: EmbeddingProvider, @unchecked Se
         let maxLen = lengths.last ?? 512
         let full = tokenizer.encode(text)
         let length = lengths.first { $0 >= full.count } ?? maxLen
-        let ids = tokenizer.contextIDs(text, length: length, padID: manifest.padID ?? 1)   // truncates keeping </s> (H10)
+        let left = manifest.padLeft ?? false
+        let ids = tokenizer.contextIDs(text, length: length, padID: manifest.padID ?? 1, padLeft: left)   // truncates keeping the end token (H10)
         let real = min(full.count, length)
         let mask = try MLMultiArray(shape: [1, NSNumber(value: length)], dataType: .int32)
         let mp = mask.dataPointer.bindMemory(to: Int32.self, capacity: length)
-        for i in 0..<length { mp[i] = i < real ? 1 : 0 }
+        for i in 0..<length { mp[i] = (left ? i >= length - real : i < real) ? 1 : 0 }
         let input = try MLDictionaryFeatureProvider(dictionary: [
             manifest.textInput ?? "input_ids": MLFeatureValue(multiArray: try CoreMLSupport.ids(ids, length: length)),
             manifest.attentionMaskInput ?? "attention_mask": MLFeatureValue(multiArray: mask),

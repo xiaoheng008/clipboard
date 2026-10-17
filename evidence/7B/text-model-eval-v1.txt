@@ -1,0 +1,24 @@
+==========
+model multilingual-e5-small@1: load 2415 ms, index 40 docs 170 ms
+multilingual-e5-small@1  top1 56%  top3 69%  MRR 0.643  | query p50 2.1 ms p95 2.4 ms | correct−best-wrong gap mean -0.000
+  zh→zh: top1 15/15  top3 15/15  MRR 1.000
+  zh→en: top1 0/15  top3 1/15  MRR 0.107
+  en→zh: top1 10/15  top3 15/15  MRR 0.822
+==========
+model granite-97m-multilingual@1: load 26568 ms, index 40 docs 564 ms
+granite-97m-multilingual@1  top1 93%  top3 98%  MRR 0.961  | query p50 8.1 ms p95 8.4 ms | correct−best-wrong gap mean 0.062
+  zh→zh: top1 14/15  top3 14/15  MRR 0.950
+  zh→en: top1 13/15  top3 15/15  MRR 0.933
+  en→zh: top1 15/15  top3 15/15  MRR 1.000
+==========
+model embeddinggemma-300m@1: load 6124 ms, index 40 docs 5145 ms
+embeddinggemma-300m@1  top1 98%  top3 100%  MRR 0.989  | query p50 109.9 ms p95 115.7 ms | correct−best-wrong gap mean 0.202
+  zh→zh: top1 14/15  top3 15/15  MRR 0.967
+  zh→en: top1 15/15  top3 15/15  MRR 1.000
+  en→zh: top1 15/15  top3 15/15  MRR 1.000
+==========
+model qwen3-embedding-0.6b@1: load 21482 ms, index 40 docs 688 ms
+qwen3-embedding-0.6b@1  top1 96%  top3 100%  MRR 0.978  | query p50 17.7 ms p95 18.9 ms | correct−best-wrong gap mean 0.213
+  zh→zh: top1 13/15  top3 15/15  MRR 0.933
+  zh→en: top1 15/15  top3 15/15  MRR 1.000
+  en→zh: top1 15/15  top3 15/15  MRR 1.000
