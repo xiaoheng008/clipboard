@@ -49,7 +49,8 @@ open dist/ClipVault.app       # 启动后出现在菜单栏
 | 用途 | 推荐模型 | 下载大小 | 说明 |
 |---|---|---|---|
 | 用文字搜图片、相似图片 | SigLIP2 Base | 约 750 MB | Google，Apache-2.0，中英文 |
-| 按意思搜文本 | Multilingual E5 Small | 约 240 MB | Microsoft，MIT，中英文 |
+| 按意思搜文本 | Qwen3 Embedding 0.6B（内存 ≥ 16 GB 推荐） | 约 1.2 GB | 阿里通义，Apache-2.0，中英互搜 |
+| 按意思搜文本（轻量） | Granite Embedding 97M | 约 120 MB | IBM，Apache-2.0，中英互搜 |
 | 轻量搜图（英文） | MobileCLIP S0 / S2 / B-LT | 100–290 MB | Apple，适合内存较小的机器 |
 
 模型只在点击「下载」时联网获取（显示实时进度，可随时取消），校验 SHA-256 后完全离线运行。启用后，已有的历史会在后台自动建立索引；切换模型时，新模型加载完成前搜索继续使用旧模型。
@@ -67,7 +68,7 @@ $ClipVault --search "海边的日落"      # 在终端里搜索
 $ClipVault --model list             # 查看 / 安装 / 启用模型
 $ClipVault --login-item status      # 登录时启动的状态（on / off 开关）
 $ClipVault --slow-ops               # 最慢的按钮操作（保留最慢 1000 次，用于性能优化）
-$ClipVault --model threshold multilingual-e5-small@1 --floor 0.85 --margin 0.06   # 调整语义阈值
+$ClipVault --model threshold qwen3-embedding-0.6b@1 --floor 0.45 --margin 0.08   # 调整语义阈值
 $ClipVault --help                   # 全部命令
 ```
 
@@ -96,4 +97,4 @@ scripts/test.sh      # 运行全部测试（Swift Testing）
 
 ## 许可证
 
-代码采用 [MIT](LICENSE)。模型不随仓库分发，由用户在应用内下载，各自遵循其许可证：SigLIP2（Apache-2.0）、Multilingual E5（MIT）、MobileCLIP（Apple ASCL）、CLIP 分词器（OpenAI，MIT）。
+代码采用 [MIT](LICENSE)。模型不随仓库分发，由用户在应用内下载，各自遵循其许可证：SigLIP2（Apache-2.0）、Qwen3 Embedding（Apache-2.0）、Granite Embedding（Apache-2.0）、Multilingual E5（MIT）、MobileCLIP（Apple ASCL）、CLIP 分词器（OpenAI，MIT）。
