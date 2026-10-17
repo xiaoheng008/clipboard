@@ -56,6 +56,11 @@ public enum Diagnostics {
             add("schema", v == Schema.currentVersion ? .pass : .fail, "v\(v) (expected v\(Schema.currentVersion))")
             let qc = try await rt.db.quickCheck()
             add("integrity", qc == "ok" ? .pass : .fail, qc)
+            // FR27 (3.1 §4.5): kind tabs use the index markers only once the rebuild is done.
+            switch try await rt.db.kindMarkerState() {
+            case .done: add("index.kind_markers", .pass, "done")
+            case .rebuilding: add("index.kind_markers", .warn, "rebuilding: \(try await rt.db.kindMarkerRemaining()) items left; kind tabs use the slower filter until done (app finishes it in the background, or run --reindex-markers)")
+            }
         } catch { add("schema", .fail, String(describing: error)) }
 
         switch probes.pasteboardAccess {

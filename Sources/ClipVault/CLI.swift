@@ -19,6 +19,7 @@ enum CLI {
       --run-jobs                         run pending OCR / embedding jobs until done
       --reindex  (--dry-run | --only <item-id> | --all)
       --gc       (--dry-run | --only <blob-hash> | --all)
+      --reindex-markers                  finish the v1 → v2 kind-marker index rebuild now (resumable)
       --model list | recommend | install <id> | activate <id> | deactivate [image|text] | remove <id>
       --model purge-inactive (--dry-run | --only <model-id> | --all)
       --model threshold <id> [--floor X] [--margin Y] | --reset     semantic match strictness (FR24)
@@ -192,6 +193,16 @@ enum CLI {
             let r = try await Maintenance.reindex(rt, scope: scope)
             print("failed jobs: \(r.failedToReset)  images missing OCR: \(r.missingOCR)  missing vectors (active model): \(r.missingEmbeddings)")
             print(scope == .dryRun ? "dry run: nothing changed" : "changed: \(r.changed) (run --run-jobs or keep the app open to process)")
+            return 0
+
+        case "--reindex-markers":
+            _ = try check(rest)
+            let rt = try await openRuntime()
+            let before = try await rt.db.kindMarkerRemaining()
+            print("kind markers: \(try await rt.db.kindMarkerState()), \(before) items left")
+            let t = Date()
+            let batches = try await rt.db.rebuildAllKindMarkers(pause: .zero) { left in print("  \(left) left") }
+            print(String(format: "done: %d batches in %.1fs", batches, Date().timeIntervalSince(t)))
             return 0
 
         case "--gc":

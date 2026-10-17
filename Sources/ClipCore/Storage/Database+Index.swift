@@ -9,11 +9,13 @@ extension Database {
     }
 
     func writeVision(itemID: Int64, ocr: String, labels: String) throws -> Bool {
-        guard let (seq, text) = try conn.query("SELECT seq, text FROM items WHERE id = ?", [itemID], { r in (r.int(0), r.text(1)) }).first else { return false }
+        guard let (seq, text, kind) = try conn.query("SELECT seq, text, kind FROM items WHERE id = ?", [itemID], { r in
+            (r.int(0), r.text(1), ItemKind(rawValue: r.text(2) ?? ""))
+        }).first else { return false }
         // Empty string (not NULL) = processed with no text found; NULL = never processed (reindex relies on this).
         try conn.run("UPDATE items SET ocr_text = ?, labels = ? WHERE id = ?", [ocr, labels, itemID])
         try deleteIndexes(seq: seq)
-        try writeIndexes(seq: seq, ftsBody: ftsBody(text: text, ocr: ocr, labels: labels).0, ngram: ngramBody(text: text, ocr: ocr, labels: labels))
+        try writeIndexes(seq: seq, ftsBody: ftsBody(text: text, ocr: ocr, labels: labels, kind: kind).0, ngram: ngramBody(text: text, ocr: ocr, labels: labels, kind: kind))
         return true
     }
 }

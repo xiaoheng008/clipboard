@@ -40,7 +40,7 @@ public enum QueryPlanner {
     static let trigramMinimum = 3
 
     public static func plan(_ query: String) -> QueryPlan {
-        let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        let terms = KindMarker.strip(query).split(whereSeparator: \.isWhitespace).map(String.init)
         var fts: [String] = []
         var like: [String] = []
         for t in terms {

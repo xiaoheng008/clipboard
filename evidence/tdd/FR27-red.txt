@@ -1,0 +1,12 @@
+Tests/ClipCoreTests/KindMarkerTests.swift failed with a nonzero exit code. Command line:     cd /Users/xiaoheng/Program/app
+Tests/ClipCoreTests/KindMarkerTests.swift:101:101: [1;31merror: [1;39mcannot find 'KindMarker' in scope[0;0m
+Tests/ClipCoreTests/KindMarkerTests.swift:101:30: [1;31merror: [1;39mvalue of type 'ReadStore' has no member 'searchExpression'[0;0m
+Tests/ClipCoreTests/KindMarkerTests.swift:103:28: [1;31merror: [1;39mvalue of type 'Database' has no member 'rebuildKindMarkers'[0;0m
+Tests/ClipCoreTests/KindMarkerTests.swift:107:30: [1;31merror: [1;39mvalue of type 'Database' has no member 'kindMarkerState'[0;0m
+Tests/ClipCoreTests/KindMarkerTests.swift:109:34: [1;31merror: [1;39mvalue of type 'ReadStore' has no member 'indexedItemIDs'[0;0m
+Tests/ClipCoreTests/KindMarkerTests.swift:109:81: [1;31merror: [1;39mcannot find 'KindMarker' in scope[0;0m
+Tests/ClipCoreTests/KindMarkerTests.swift:111:30: [1;31merror: [1;39mvalue of type 'Database' has no member 'rebuildKindMarkers'[0;0m
+Tests/ClipCoreTests/KindMarkerTests.swift:119:35: [1;31merror: [1;39mvalue of type 'Database' has no member 'kindMarkerState'[0;0m
+Tests/ClipCoreTests/KindMarkerTests.swift:120:37: [1;31merror: [1;39mtype 'DatabaseFault?' has no member 'failInMarkerRebuild'[0;0m
+Tests/ClipCoreTests/KindMarkerTests.swift:121:66: [1;31merror: [1;39mvalue of type 'Database' has no member 'rebuildKindMarkers'[0;0m
+Tests/ClipCoreTests/KindMarkerTests.swift:122:30: [1;31merror: [1;39mvalue of type 'Database' has no member 'kindMarkerState'[0;0m

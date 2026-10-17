@@ -563,6 +563,17 @@ public struct Runtime: Sendable {
                          worker: worker, service: service, services: services)
         if startWorker {
             Task.detached(priority: .utility) { await worker.runLoop() }
+            // FR27: finish the v1 → v2 index rebuild in the background (no-op when done; resumes after a crash).
+            Task.detached(priority: .utility) {
+                guard case .rebuilding = (try? await db.kindMarkerState()) ?? .done else { return }
+                let started = Date()
+                do {
+                    let batches = try await db.rebuildAllKindMarkers()
+                    Log.shared.event("index.kind_markers_done", ["batches": .int(Int64(batches)), "ms": .int(Int64(Date().timeIntervalSince(started) * 1000))])
+                } catch {
+                    Log.shared.event("index.kind_markers_failed", ["error": .error(error)])
+                }
+            }
         }
         Log.shared.event("runtime.opened", ["version": .label(AppVersion.marketing), "worker": .bool(startWorker)])
         return rt

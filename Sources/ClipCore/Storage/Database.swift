@@ -63,7 +63,7 @@ public struct StoreCounts: Sendable, Equatable {
     public var jobsFailed = 0
 }
 
-enum DatabaseFault: Sendable { case failAfterItemInsert }
+enum DatabaseFault: Sendable { case failAfterItemInsert, failInMarkerRebuild }
 
 struct InjectedFault: Error {}
 
@@ -83,26 +83,27 @@ func readSummary(_ r: SQLRow, offset o: Int32 = 0) -> ItemSummary {
 }
 
 /// FTS input: text (bounded, H2) + OCR + labels. Returns whether the text was truncated.
-func ftsBody(text: String?, ocr: String?, labels: String?, maxTextBytes: Int = 256 * 1024) -> (String, Bool) {
+func ftsBody(text: String?, ocr: String?, labels: String?, kind: ItemKind?, maxTextBytes: Int = 256 * 1024) -> (String, Bool) {
     var truncated = false
-    var t = text ?? ""
+    var t = KindMarker.strip(text ?? "")
     if t.utf8.count > maxTextBytes {
         truncated = true
         var end = t.utf8.index(t.utf8.startIndex, offsetBy: maxTextBytes)
         while end > t.startIndex && !t.indices.contains(end) { end = t.utf8.index(before: end) }
         t = String(t[..<end])
     }
-    let body = [t, ocr ?? "", labels ?? ""].filter { !$0.isEmpty }.joined(separator: "\n")
-    return (body, truncated)
+    let parts = [t, KindMarker.strip(ocr ?? ""), KindMarker.strip(labels ?? "")] + (kind.map { [KindMarker.fts($0)] } ?? [])
+    return (parts.filter { !$0.isEmpty }.joined(separator: "\n"), truncated)
 }
 
 /// N-gram index input (H9): unigrams + bigrams of each whitespace-separated word, over the first
 /// `maxChars` characters of text, OCR and labels. Tokens are hex-encoded UTF-8 so the `ascii`
 /// tokenizer keeps them intact (punctuation and CJK included).
-func ngramBody(text: String?, ocr: String?, labels: String?, maxChars: Int = 2048) -> String {
+func ngramBody(text: String?, ocr: String?, labels: String?, kind: ItemKind?, maxChars: Int = 2048) -> String {
     var tokens = Set<String>()
+    if let kind { tokens.insert(KindMarker.ngram(kind)) }
     for part in [text, ocr, labels] {
-        guard let part, !part.isEmpty else { continue }
+        guard let part = part.map(KindMarker.strip), !part.isEmpty else { continue }
         for word in part.prefix(maxChars).lowercased().split(whereSeparator: \.isWhitespace) {
             let chars = Array(word)
             for i in chars.indices {
@@ -162,7 +163,7 @@ public actor Database {
             try touchInTransaction(id: existing, at: t)
             return IngestResult(id: existing, isNew: false)
         }
-        let (body, truncated) = ftsBody(text: d.text, ocr: nil, labels: nil)
+        let (body, truncated) = ftsBody(text: d.text, ocr: nil, labels: nil, kind: d.kind)
         let seq = try nextSeq()
         try conn.run("""
             INSERT INTO items(seq, kind, content_hash, text, blob_hash, byte_size, width, height, source_bundle, source_name,
@@ -175,7 +176,7 @@ public actor Database {
         for r in d.representations {
             try conn.run("INSERT INTO representations(item_id, uti, data) VALUES (?,?,?)", [id, r.uti, r.data])
         }
-        try writeIndexes(seq: seq, ftsBody: body, ngram: ngramBody(text: d.text, ocr: nil, labels: nil))
+        try writeIndexes(seq: seq, ftsBody: body, ngram: ngramBody(text: d.text, ocr: nil, labels: nil, kind: d.kind))
         for j in jobs { try insertJob(itemID: id, j) }
         return IngestResult(id: id, isNew: true)
     }
@@ -206,13 +207,63 @@ public actor Database {
 
     /// Renews the item's recency: new seq, and both index rows move with it (same transaction).
     func touchInTransaction(id: Int64, at t: Int64) throws {
-        guard let row = try conn.query("SELECT seq, text, ocr_text, labels FROM items WHERE id = ?", [id], {
-            ($0.int(0), $0.text(1), $0.text(2), $0.text(3))
+        guard let row = try conn.query("SELECT seq, text, ocr_text, labels, kind FROM items WHERE id = ?", [id], {
+            ($0.int(0), $0.text(1), $0.text(2), $0.text(3), ItemKind(rawValue: $0.text(4) ?? ""))
         }).first else { return }
         let seq = try nextSeq()
         try deleteIndexes(seq: row.0)
         try conn.run("UPDATE items SET seq = ?, last_used_at = ?, use_count = use_count + 1 WHERE id = ?", [seq, t, id])
-        try writeIndexes(seq: seq, ftsBody: ftsBody(text: row.1, ocr: row.2, labels: row.3).0, ngram: ngramBody(text: row.1, ocr: row.2, labels: row.3))
+        try writeIndexes(seq: seq, ftsBody: ftsBody(text: row.1, ocr: row.2, labels: row.3, kind: row.4).0,
+                         ngram: ngramBody(text: row.1, ocr: row.2, labels: row.3, kind: row.4))
+    }
+
+    // MARK: Kind markers (FR27, 3.1 §4.5)
+
+    public func kindMarkerState() throws -> KindMarkerState { KindMarkerState(setting: try setting(KindMarker.settingKey)) }
+
+    /// Items whose index rows still lack markers (diagnostics / progress).
+    public func kindMarkerRemaining() throws -> Int {
+        guard case .rebuilding(let cursor) = try kindMarkerState() else { return 0 }
+        return Int(try conn.scalarInt("SELECT count(*) FROM items WHERE seq < ?", [cursor]))
+    }
+
+    /// Runs `rebuildKindMarkers` until done, pausing between batches so captures are not held up
+    /// (each batch is its own short transaction on the single writer). Returns the number of batches.
+    /// Driven by the app's Runtime and by `ClipVault --reindex-markers`.
+    /// Batch 200: measured at 1M items a 2000-row batch held the writer ≈ 2.1 s (secure-delete makes the
+    /// index deletes expensive), delaying a capture by that much; 200 rows ≈ 0.2 s.
+    public func rebuildAllKindMarkers(batch: Int = 200, pause: Duration = .milliseconds(20),
+                                      progress: (@Sendable (Int) -> Void)? = nil) async throws -> Int {
+        var batches = 0
+        while try rebuildKindMarkers(batch: batch) {
+            batches += 1
+            progress?(try kindMarkerRemaining())
+            try await Task.sleep(for: pause)
+        }
+        return batches
+    }
+
+    /// Rewrites one batch of index rows (seq < cursor, newest first) with markers and moves the cursor,
+    /// in one transaction. Returns false when there was nothing left (state is then `done`).
+    public func rebuildKindMarkers(batch: Int) throws -> Bool {
+        guard case .rebuilding(let cursor) = try kindMarkerState() else { return false }
+        return try conn.transaction {
+            let rows = try conn.query("SELECT seq, text, ocr_text, labels, kind FROM items WHERE seq < ? ORDER BY seq DESC LIMIT ?", [cursor, batch]) {
+                ($0.int(0), $0.text(1), $0.text(2), $0.text(3), ItemKind(rawValue: $0.text(4) ?? ""))
+            }
+            guard let last = rows.last else {
+                try setSetting(KindMarker.settingKey, KindMarkerState.done.settingValue)
+                return false
+            }
+            for (i, r) in rows.enumerated() {
+                try deleteIndexes(seq: r.0)
+                try writeIndexes(seq: r.0, ftsBody: ftsBody(text: r.1, ocr: r.2, labels: r.3, kind: r.4).0,
+                                 ngram: ngramBody(text: r.1, ocr: r.2, labels: r.3, kind: r.4))
+                if i == 0, fault == .failInMarkerRebuild { throw InjectedFault() }
+            }
+            try setSetting(KindMarker.settingKey, KindMarkerState.rebuilding(cursor: last.0).settingValue)
+            return true
+        }
     }
 
     public func setPinned(id: Int64, _ on: Bool) throws {

@@ -17,7 +17,7 @@ public enum SchemaError: Error, CustomStringConvertible {
 }
 
 public enum Schema {
-    public static let currentVersion = 1
+    public static let currentVersion = 2   // v2 (FR27): kind markers in the index bodies; DDL unchanged
 
     static let v1 = """
     -- 键值配置：hotkey（"keyCode:modifiers"，"none" = 用户已清除）、active_model（图片模型）、
@@ -109,12 +109,12 @@ public enum Schema {
     static func migrate(_ c: SQLiteConnection, databaseURL: URL) throws {
         let found = try version(c)
         if found > currentVersion { throw SchemaError.newerThanApp(found: found, supported: currentVersion) }
-        if found == currentVersion {
+        if found >= 1 {
             // R22: v1 changed once before release (seq / n-gram). Refuse such databases loudly.
             let columns = try c.query("PRAGMA table_info(items)", []) { $0.text(1) ?? "" }
             let tables = try c.query("SELECT name FROM sqlite_master WHERE type = 'table'", []) { $0.text(0) ?? "" }
             guard columns.contains("seq"), tables.contains("items_ngram") else { throw SchemaError.incompatible("missing seq / items_ngram") }
-            return
+            if found == currentVersion { return }
         }
         if found > 0 {
             // Forward migration of real user data: keep a copy first (sync-recovery §7).
@@ -124,6 +124,12 @@ public enum Schema {
         }
         try c.transaction {
             if found < 1 { try c.exec(v1) }
+            if found == 1 {
+                // v2: index rows written by v1 lack kind markers; rebuild them in the background (3.1 §4.5).
+                let cursor = try c.scalarInt("SELECT coalesce(max(seq), 0) + 1 FROM items")
+                try c.run("INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                          [KindMarker.settingKey, KindMarkerState.rebuilding(cursor: cursor).settingValue])
+            }
             try c.exec("PRAGMA user_version = \(currentVersion)")
         }
     }

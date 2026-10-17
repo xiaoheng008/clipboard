@@ -1,0 +1,4 @@
+kind markers: rebuilding(cursor: 1000001), 1000000 items left
+done: 500 batches in 1073.8s
+[Diag] schema                  PASS  v2 (expected v2)
+[Diag] index.kind_markers      PASS  done
