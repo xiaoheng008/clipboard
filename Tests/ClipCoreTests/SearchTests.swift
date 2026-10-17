@@ -135,6 +135,21 @@ import Testing
         #expect(try await rs.search(QueryPlanner.plan("be"), kind: .all, limit: 2).map(\.item.id) == [ids[0], ids[2]])
     }
 
+    // 1M-row bench: a common term matches ~25% of items; with few pinned items the pinned pass must start
+    // from them and probe the index by rowid, not walk every match to find pinned=1 (98 ms → ~20 ms).
+    // Result order is covered by pinnedMatchesComeFirst.
+    @Test func pinnedPassIsDrivenByPinnedItems() async throws {
+        let (_, rs, _) = try await ReadStoreSearchTests().setup(["beta 1"])
+        for q in ["beta", "be"] {
+            let plan = try await rs.explain(QueryPlanner.plan(q), pass: .pinned)
+            #expect(plan.first?.contains("items_recent (pinned=?)") == true, "\(q): \(plan)")
+            #expect(plan.dropFirst().first?.contains("VIRTUAL TABLE") == true, "\(q): \(plan)")
+        }
+        // The recent pass keeps streaming the index in rowid (recency) order.
+        let recent = try await rs.explain(QueryPlanner.plan("beta"), pass: .recent)
+        #expect(recent.first?.contains("VIRTUAL TABLE") == true, "\(recent)")
+    }
+
     // Short (1–2 char) queries use the n-gram index, which covers the first H9 characters of each item.
     @Test func shortQueriesUseNgramIndexWithinPrefix() async throws {
         let long = String(repeating: "x", count: 3000) + " 尾巴"

@@ -1,0 +1,3 @@
+Tests/ClipCoreTests/SearchTests.swift failed with a nonzero exit code. Command line:     cd /Users/xiaoheng/Program/app
+Tests/ClipCoreTests/SearchTests.swift:143:75: [1;31merror: [1;39mextra argument 'pinned' in call[0;0m
+Tests/ClipCoreTests/SearchTests.swift:148:80: [1;31merror: [1;39mextra argument 'pinned' in call[0;0m

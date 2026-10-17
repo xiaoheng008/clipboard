@@ -18,6 +18,8 @@ public enum Bench {
     }
 
     static func sentence(_ rng: inout RNG, serial: Int) -> String {
+        // ~2% links, so the kind tabs (文本 / 链接 / 图片) have something to filter.
+        if serial % 50 == 49 { return "https://example.com/\(english.randomElement(using: &rng)!)/\(english.randomElement(using: &rng)!)?id=\(serial)" }
         var parts: [String] = []
         for _ in 0..<Int.random(in: 4...30, using: &rng) {
             if Bool.random(using: &rng) { parts.append(english.randomElement(using: &rng)!) }
@@ -54,6 +56,10 @@ public enum Bench {
             if inserted % 100_000 == 0 || inserted == items { log("  inserted \(inserted)/\(items) (\(Int(Date().timeIntervalSince(started)))s)") }
         }
         out(String(format: "insert: %d items in %.1fs (%.0f items/s)", items, Date().timeIntervalSince(started), Double(items) / Date().timeIntervalSince(started)))
+        // A realistic library has some pinned items; the pinned search pass depends on them.
+        let pinnedIDs = Array(stride(from: Int64(1), through: Int64(items), by: max(1, items / 50)).prefix(50))
+        for id in pinnedIDs { try? await db.setPinned(id: id, true) }
+        out("pinned: \(pinnedIDs.count) items")
         let dbBytes = (try? FileManager.default.attributesOfItem(atPath: home.databaseURL.path)[.size] as? NSNumber)?.int64Value ?? 0
         out(String(format: "database size: %.1f MB", Double(dbBytes) / 1_048_576))
 
@@ -64,10 +70,16 @@ public enum Bench {
             out(String(format: "%@ p50=%.1fms p95=%.1fms budget=%.0fms %@ %@", name, t.p50, t.p95, budget, ok ? "PASS" : "FAIL", extra))
         }
         var hits = 0
-        out("plan 'clipboard': " + ((try? await reads.explain(QueryPlanner.plan("clipboard"))) ?? "?"))
+        for pass in [ReadStore.Pass.pinned, .recent] {
+            out("plan 'clipboard' \(pass): " + ((try? await reads.explain(QueryPlanner.plan("clipboard"), pass: pass))?.joined(separator: " | ") ?? "?"))
+        }
         check("page.first", 50, try await time(30) { hits = try await reads.page(after: nil, kind: .all, limit: 60).count }, "rows=\(hits)")
         for q in ["clipboard", "invoice report", "数据库", "剪切板历史", "#987654", "nonexistentterm"] {
             check("search.fts '\(q)'", 50, try await time(20) { hits = try await reads.search(QueryPlanner.plan(q), kind: .all, limit: 200).count }, "hits=\(hits)")
+        }
+        // Kind tabs are a filter outside the index order: a rare kind can mean walking every match.
+        for (q, k) in [("clipboard", KindFilter.url), ("clipboard", .image), ("clipboard", .text)] {
+            check("search.fts '\(q)' kind=\(k.rawValue)", 50, try await time(20) { hits = try await reads.search(QueryPlanner.plan(q), kind: k, limit: 200).count }, "hits=\(hits)")
         }
         for q in ["发票", "图", "zz"] {
             check("search.like '\(q)'", 150, try await time(10) { hits = try await reads.search(QueryPlanner.plan(q), kind: .all, limit: 200).count }, "hits=\(hits)")
