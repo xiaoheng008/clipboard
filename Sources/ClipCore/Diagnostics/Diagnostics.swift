@@ -99,12 +99,14 @@ public enum Diagnostics {
                 add(name, .pass, "\(m.id) — \(m.displayName)")
                 if let cov = try? await rt.service.coverage(modelID: m.id) {
                     add(name + ".coverage", cov.failed > 0 ? .warn : .pass, "indexed \(cov.indexed)/\(cov.images), pending \(cov.pending), failed \(cov.failed)")
-                    let engine = slot == .image ? rt.engine : rt.textEngine
+                    let engine = slot == .image ? rt.engine : (slot == .text ? rt.textEngine : rt.similarEngine)
                     if let idx = await engine.activeIndex {
                         let mem = await idx.count()
                         add(name + ".index", mem == cov.indexed ? .pass : .fail, "in-memory vectors \(mem) / stored \(cov.indexed)")
                     }
                 }
+            } else if slot == .similar {
+                add(name, .pass, "follows the image-search model")
             } else {
                 let rec = await rt.service.recommendedModel(slot: slot)
                 add(name, .warn, "none → \(slot == .image ? "image" : "text") semantic search disabled" + (rec.map { "; recommended: \($0.id)" } ?? ""))

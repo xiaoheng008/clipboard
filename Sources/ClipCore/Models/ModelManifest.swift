@@ -59,7 +59,13 @@ public struct ModelManifest: Codable, Sendable, Equatable, Identifiable {
     /// Can answer a text query (image models: text→image; text models: text→text).
     public var supportsTextQueries: Bool { ["coreml-clip", "coreml-siglip", "coreml-text-embed"].contains(family) }
     /// Which active-model slot this model occupies.
-    public var slot: ModelSlot { family == "coreml-text-embed" ? .text : .image }
+    public var slot: ModelSlot {
+        switch family {
+        case "coreml-text-embed": .text
+        case "vision-featureprint": .similar      // FR26: image→image only; its own slot
+        default: .image
+        }
+    }
     public var isMultilingual: Bool { multilingual ?? false }
     public var floor: Float { scoreFloor ?? 0.10 }
     public var margin: Float { scoreMargin ?? 0.06 }
@@ -110,9 +116,12 @@ public enum ModelPathError: Error, CustomStringConvertible {
     }
 }
 
-/// Two independent active models: one for images, one for text semantics (FR20).
+/// Independent active models (FR20, FR26): text→image search, text semantics, and similar images
+/// (which follow the image slot unless a dedicated model is enabled).
 public enum ModelSlot: String, Sendable, CaseIterable, Codable {
-    case image, text
+    case image, text, similar
+    /// Slots that answer text queries in search.
+    public static let searchable: [ModelSlot] = [.image, .text]
 }
 
 /// Install layout written by ModelInstaller. Directory without install.json = not installed.

@@ -315,6 +315,7 @@ struct ModelsTab: View {
             }
             slotSection(.image, title: "图片搜索模型（用文字描述找图片）")
             slotSection(.text, title: "文本语义模型（按意思找历史文本，中英互通）")
+            slotSection(.similar, title: "相似图片（图片详情下方的相似图片）")
             Section("向量数据") {
                 HStack {
                     TrackedButton("清理未启用模型的向量…", tracker: model.tracker, key: "settings.purge.preview", name: "settings.purge.preview") {
@@ -347,6 +348,10 @@ struct ModelsTab: View {
                 if let a = model.active[slot], let c = model.coverage[slot] {
                     let noun = slot == .image ? "张图片" : "条文本"
                     Text("当前启用：\(a) · 已建索引 \(c.indexed)/\(c.images) \(noun)" + (c.pending > 0 ? "（进行中 \(c.pending)）" : "") + (c.failed > 0 ? " · 失败 \(c.failed)" : ""))
+                } else if slot == .similar {
+                    // FR26: no dedicated model → similar images use the image-search model's vectors.
+                    Text(model.active[.image].map { "跟随图片搜索模型（当前：\($0)）" } ?? "跟随图片搜索模型（当前未启用，相似图片不可用）")
+                        .foregroundStyle(.secondary)
                 } else {
                     Text(slot == .image ? "未启用：图片只能按图中文字搜索" : "未启用：文本只能按关键词搜索").foregroundStyle(.secondary)
                 }
@@ -354,7 +359,7 @@ struct ModelsTab: View {
             if let e = model.tracker.message("settings.model.activate.\(slot.rawValue)") ?? model.tracker.message("settings.model.deactivate.\(slot.rawValue)") {
                 Text(e).foregroundStyle(.red).font(.caption)
             }
-            if let id = model.active[slot], let m = model.catalog.first(where: { $0.id == id }) { thresholdEditor(m) }
+            if ModelSlot.searchable.contains(slot), let id = model.active[slot], let m = model.catalog.first(where: { $0.id == id }) { thresholdEditor(m) }
             ForEach(model.catalog.filter { $0.slot == slot }) { m in row(m) }
         }
     }
@@ -408,20 +413,21 @@ struct ModelsTab: View {
     /// FR24: how strict semantic matches are for the active model (H5 relative filter).
     @ViewBuilder private func thresholdEditor(_ m: ModelManifest) -> some View {
         let id = m.id
-        let floorRange = max(-1, Double(m.floor) - 0.25)...min(1, Double(m.floor) + 0.15)
-        let marginRange = 0.0...max(0.15, Double(m.margin) * 4)
+        // Full valid ranges (cosine similarity); exact values can be typed in the fields.
+        let floorRange = -1.0...1.0
+        let marginRange = 0.0...1.0
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text("相似度下限").frame(width: 120, alignment: .leading)
                 Slider(value: Binding(get: { model.floorDraft[id] ?? Double(m.floor) }, set: { model.floorDraft[id] = $0 }),
                        in: floorRange, step: 0.005) { editing in if !editing { save(id) } }
-                Text(String(format: "%.3f", model.floorDraft[id] ?? Double(m.floor))).monospacedDigit().frame(width: 48)
+                numberField(Binding(get: { model.floorDraft[id] ?? Double(m.floor) }, set: { model.floorDraft[id] = min(1, max(-1, $0)) })) { save(id) }
             }
             HStack {
                 Text("与最佳结果最大差距").frame(width: 120, alignment: .leading)
                 Slider(value: Binding(get: { model.marginDraft[id] ?? Double(m.margin) }, set: { model.marginDraft[id] = $0 }),
                        in: marginRange, step: 0.002) { editing in if !editing { save(id) } }
-                Text(String(format: "%.3f", model.marginDraft[id] ?? Double(m.margin))).monospacedDigit().frame(width: 48)
+                numberField(Binding(get: { model.marginDraft[id] ?? Double(m.margin) }, set: { model.marginDraft[id] = min(1, max(0, $0)) })) { save(id) }
             }
             HStack {
                 Text("默认 下限 \(String(format: "%.3f", m.floor)) · 差距 \(String(format: "%.3f", m.margin))。下限越低、差距越大，返回的语义结果越多（也越可能不相关）。")
@@ -435,6 +441,12 @@ struct ModelsTab: View {
             }
             if let e = model.tracker.message("settings.model.thresholds.\(id)") { Text(e).foregroundStyle(.red).font(.caption) }
         }
+    }
+
+    private func numberField(_ value: Binding<Double>, onCommit: @escaping () -> Void) -> some View {
+        TextField("", value: value, format: .number.precision(.fractionLength(3)))
+            .monospacedDigit().multilineTextAlignment(.trailing).frame(width: 64)
+            .onSubmit(onCommit)
     }
 
     private func save(_ id: String) {

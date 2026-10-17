@@ -104,6 +104,7 @@ public enum ServiceError: Error, CustomStringConvertible {
 public enum SettingKey {
     public static let activeModel = "active_model"
     public static let activeTextModel = "active_text_model"
+    public static let activeSimilarModel = "active_similar_model"
     public static let hotkey = "hotkey"
     public static let excludedApps = "excluded_apps"
     /// FR24 per-model overrides: "semantic_floor:<model id>", "semantic_margin:<model id>".
@@ -118,6 +119,7 @@ public actor ClipService {
     let blobs: BlobStore
     let engine: SemanticEngine        // image slot
     let textEngine: SemanticEngine    // text slot (FR19)
+    let similarEngine: SemanticEngine // similar-images slot (FR26)
     let worker: IndexWorker
     let services: PlatformServices
     public nonisolated let catalog: ModelCatalog
@@ -178,15 +180,24 @@ public actor ClipService {
     var requireInstalledModels = true
     private var activeModel: ModelManifest? { active[.image] }
 
-    init(db: Database, reads: ReadStore, blobs: BlobStore, engine: SemanticEngine, textEngine: SemanticEngine, worker: IndexWorker,
-         services: PlatformServices, catalog: ModelCatalog) {
-        self.db = db; self.reads = reads; self.blobs = blobs; self.engine = engine; self.textEngine = textEngine; self.worker = worker
-        self.services = services; self.catalog = catalog
+    init(db: Database, reads: ReadStore, blobs: BlobStore, engine: SemanticEngine, textEngine: SemanticEngine, similarEngine: SemanticEngine,
+         worker: IndexWorker, services: PlatformServices, catalog: ModelCatalog) {
+        self.db = db; self.reads = reads; self.blobs = blobs; self.engine = engine; self.textEngine = textEngine
+        self.similarEngine = similarEngine; self.worker = worker; self.services = services; self.catalog = catalog
     }
 
     static let textEmbeddedKinds: [ItemKind] = [.text, .rich]
-    static func kinds(for slot: ModelSlot) -> [ItemKind] { slot == .image ? [.image] : textEmbeddedKinds }
-    func engine(_ slot: ModelSlot) -> SemanticEngine { slot == .image ? engine : textEngine }
+    static func kinds(for slot: ModelSlot) -> [ItemKind] { slot == .text ? textEmbeddedKinds : [.image] }
+    func engine(_ slot: ModelSlot) -> SemanticEngine {
+        switch slot { case .image: engine; case .text: textEngine; case .similar: similarEngine }
+    }
+
+    /// FR26: similar images use the similar slot when it is active (or activating), else the image slot.
+    var similaritySlot: ModelSlot {
+        if active[.similar] != nil { return .similar }
+        if case .activating = slotState(.similar) { return .similar }
+        return .image
+    }
 
     func loadSettings() async {
         if let json = try? await db.setting(SettingKey.excludedApps), let arr = try? JSONDecoder().decode([String].self, from: Data(json.utf8)) {
@@ -232,7 +243,7 @@ public actor ClipService {
                 blobHash = h
                 markBlobPending(h)
                 jobs.append(.vision)
-                if let m = active[.image] { jobs.append(.embed(m.id)) }
+                for slot in [ModelSlot.image, .similar] { if let m = active[slot] { jobs.append(.embed(m.id)) } }
             } else if Self.textEmbeddedKinds.contains(draft.kind), let m = active[.text] {
                 jobs.append(.embed(m.id))
             }
@@ -276,8 +287,7 @@ public actor ClipService {
     public func delete(id: Int64) async throws {
         let freed = try await db.delete(id: id)
         await unlinkFreed(freed)                          // failure leaves an orphan for --gc
-        await engine.activeIndex?.remove(ids: [id])
-        await textEngine.activeIndex?.remove(ids: [id])
+        for slot in ModelSlot.allCases { await engine(slot).activeIndex?.remove(ids: [id]) }
         Log.shared.event("item.deleted", ["id": .int(id)])
         emit(.itemsChanged)
     }
@@ -286,8 +296,7 @@ public actor ClipService {
     public func clearAll() async throws {
         let freed = try await db.clearAll()
         await unlinkFreed(freed)
-        if let idx = await engine.activeIndex { await idx.replaceAll([]) }
-        if let idx = await textEngine.activeIndex { await idx.replaceAll([]) }
+        for slot in ModelSlot.allCases { if let idx = await engine(slot).activeIndex { await idx.replaceAll([]) } }
         Log.shared.event("items.cleared", ["blobs": .int(Int64(freed.count))])
         emit(.cleared)
     }
@@ -326,14 +335,14 @@ public actor ClipService {
         catch { searchError = String(describing: error) }
 
         // Two semantic routes: image slot (kind all/image) and text slot (kind all/text).
-        let applicable = ModelSlot.allCases.filter { slot in
+        let applicable = ModelSlot.searchable.filter { slot in
             slot == .image ? (req.kind == .all || req.kind == .image) : (req.kind == .all || req.kind == .text)
         }
         // R11: say why there is no semantic contribution.
         var status: SemanticStatus
         if applicable.contains(where: { active[$0] != nil }) { status = .ready(translated: nil) }
         else if let err = applicable.compactMap({ slotErrors[$0] }).first { status = .unavailable(err) }
-        else if !active.isEmpty { status = .notApplicable }
+        else if ModelSlot.searchable.contains(where: { active[$0] != nil }) || active[.similar] != nil { status = .notApplicable }
         else { status = .notEnabled }
         var untranslated = false
         var semanticHits: [SemanticHit] = []
@@ -360,8 +369,9 @@ public actor ClipService {
     // MARK: Image index status (FR25)
 
     public func imageIndexStatus(itemID: Int64) async -> ImageIndexStatus {
-        if case .activating(let target, _) = slotState(.image) { return .slotBusy(target) }
-        guard let m = active[.image] else { return .noModel }
+        let slot = similaritySlot
+        if case .activating(let target, _) = slotState(slot) { return .slotBusy(target) }
+        guard let m = active[slot] else { return .noModel }
         if (try? await db.hasEmbedding(itemID: itemID, modelID: m.id)) == true { return .indexed }
         if let job = try? await db.embedJob(itemID: itemID, modelID: m.id) {
             switch job.state {
@@ -378,7 +388,7 @@ public actor ClipService {
     }
 
     public func retryImageIndex(itemID: Int64) async throws {
-        guard let m = active[.image] else { return }
+        guard let m = active[similaritySlot] else { return }
         try await db.enqueueEmbed(itemID: itemID, modelID: m.id)
         await worker.wake()
     }
@@ -389,11 +399,12 @@ public actor ClipService {
     /// vector in the active image model's space; never returns the image itself.
     public func similarImages(to id: Int64, limit: Int) async -> SearchResponse {
         let started = Date()
-        guard let m = active[.image] else { return respond(hits: [], .notEnabled, started) }
+        let slot = similaritySlot
+        guard let m = active[slot] else { return respond(hits: [], .notEnabled, started) }
         guard let v = try? await db.embeddingVector(itemID: id, modelID: m.id) else {
             return respond(hits: [], .failed("这张图片还没有建立 \(m.displayName) 索引"), started)
         }
-        let r = await engine.similar(to: v, k: limit + 1)
+        let r = await engine(slot).similar(to: v, k: limit + 1)
         let scores = r.hits.filter { $0.id != id }.prefix(limit)
         let summaries = (try? await reads.summaries(ids: scores.map(\.id))) ?? [:]
         let hits = scores.compactMap { s in summaries[s.id].map { Hit(item: $0, sources: [.semantic], score: Double(s.score), similarity: s.score) } }
@@ -409,7 +420,17 @@ public actor ClipService {
 
     public func activeModelManifest(slot: ModelSlot = .image) -> ModelManifest? { active[slot] }
 
-    static func settingKey(_ slot: ModelSlot) -> String { slot == .image ? SettingKey.activeModel : SettingKey.activeTextModel }
+    static func settingKey(_ slot: ModelSlot) -> String {
+        switch slot { case .image: SettingKey.activeModel; case .text: SettingKey.activeTextModel; case .similar: SettingKey.activeSimilarModel }
+    }
+
+    /// FR26 migration (idempotent): Apple Vision used to live in the image slot.
+    func migrateSlotSettings() async {
+        guard let id = try? await db.setting(SettingKey.activeModel), let m = catalog.model(id: id), m.slot != .image else { return }
+        try? await db.setSetting(Self.settingKey(m.slot), id)
+        try? await db.setSetting(SettingKey.activeModel, nil)
+        Log.shared.event("model.slot_migrated", ["model": .label(id), "slot": .label(m.slot.rawValue)])
+    }
 
     /// Makes `id` the active model of its slot: provider → index loaded from DB → backfill queued.
     public func activateModel(id: String, requireInstalled: Bool = true) async throws {
@@ -469,6 +490,7 @@ public actor ClipService {
 
     func restoreActiveModels(requireInstalled: Bool) async {
         requireInstalledModels = requireInstalled
+        await migrateSlotSettings()
         for slot in ModelSlot.allCases {
             guard let id = try? await db.setting(Self.settingKey(slot)) else { continue }
             do { try await activateModel(id: id, requireInstalled: requireInstalled) }
@@ -512,6 +534,7 @@ public struct Runtime: Sendable {
     public let blobs: BlobStore
     public let engine: SemanticEngine
     public let textEngine: SemanticEngine
+    public let similarEngine: SemanticEngine
     public let worker: IndexWorker
     public let service: ClipService
     public let services: PlatformServices
@@ -527,14 +550,17 @@ public struct Runtime: Sendable {
         let engine = SemanticEngine(translator: services.translator)
         // Text models are multilingual: no translation step.
         let textEngine = SemanticEngine(translator: NoTranslator())
+        let similarEngine = SemanticEngine(translator: NoTranslator())
         let worker = IndexWorker(db: db, blobs: blobs, ocr: services.ocr)
         let (catalog, customError) = ModelCatalog.load(home: home)
         if let customError { Log.shared.event("models.custom_invalid", ["error": .label(customError)]) }
-        let service = ClipService(db: db, reads: reads, blobs: blobs, engine: engine, textEngine: textEngine, worker: worker, services: services, catalog: catalog)
+        let service = ClipService(db: db, reads: reads, blobs: blobs, engine: engine, textEngine: textEngine, similarEngine: similarEngine,
+                                  worker: worker, services: services, catalog: catalog)
         await service.loadSettings()
         await worker.setProgressHandler { [service] in Task { await service.notifyIndexProgress() } }
         await service.restoreActiveModels(requireInstalled: requireInstalledModel)
-        let rt = Runtime(home: home, db: db, reads: reads, blobs: blobs, engine: engine, textEngine: textEngine, worker: worker, service: service, services: services)
+        let rt = Runtime(home: home, db: db, reads: reads, blobs: blobs, engine: engine, textEngine: textEngine, similarEngine: similarEngine,
+                         worker: worker, service: service, services: services)
         if startWorker {
             Task.detached(priority: .utility) { await worker.runLoop() }
         }

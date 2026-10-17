@@ -376,3 +376,62 @@ final class EventLog: @unchecked Sendable {
         #expect(await rt.service.imageIndexStatus(itemID: id2) == .queued)
     }
 }
+
+@Suite struct SimilarSlotTests {
+    var ctx: CaptureContext { CaptureContext(frontmostBundleID: nil, frontmostName: nil, excludedBundleIDs: [], lastSelfWriteChangeCount: nil) }
+    func image(_ seed: UInt8) -> PasteboardSnapshot {
+        PasteboardSnapshot(changeCount: 1, types: ["public.png"], image: CapturedImage(data: pngBytes(seed: seed), uti: "public.png", width: 1, height: 1))
+    }
+    var services: PlatformServices {
+        PlatformServices(ocr: FakeOCR(), translator: NoTranslator(), pasteboard: FakeWriter(),
+                         makeProvider: { m in var e = FakeEmbedder(); e.modelID = m.id; e.dimension = m.dim; return e }, memoryGB: { 16 })
+    }
+
+    // AC26.1 — the three slots are independent; similar images use the similar slot when active.
+    @Test func slotsAreIndependent() async throws {
+        #expect(try ModelCatalog.builtin().model(id: "vision-featureprint@1")?.slot == .similar)
+        let rt = try await Runtime.open(home: try makeTempHome(), services: services, startWorker: false, requireInstalledModel: false)
+        try await rt.service.activateModel(id: "siglip2-base@1", requireInstalled: false)
+        try await rt.service.activateModel(id: "multilingual-e5-small@1", requireInstalled: false)
+        try await rt.service.activateModel(id: "vision-featureprint@1", requireInstalled: false)
+        #expect(await rt.service.activeModelManifest(slot: .image)?.id == "siglip2-base@1")
+        #expect(await rt.service.activeModelManifest(slot: .text)?.id == "multilingual-e5-small@1")
+        #expect(await rt.service.activeModelManifest(slot: .similar)?.id == "vision-featureprint@1")
+
+        // AC26.3 — an image gets vision + one embed job per image-consuming slot.
+        guard case .stored(let a, _) = await rt.service.ingest(image(1), context: ctx) else { Issue.record("ingest"); return }
+        #expect(try await rt.db.counts().jobsPending == 3)
+        guard case .stored(let b, _) = await rt.service.ingest(image(2), context: ctx) else { Issue.record("ingest"); return }
+        _ = await rt.worker.drain()
+        #expect(try await rt.db.hasEmbedding(itemID: a, modelID: "vision-featureprint@1"))
+        #expect(try await rt.db.hasEmbedding(itemID: a, modelID: "siglip2-base@1"))
+        #expect(await rt.service.similarImages(to: a, limit: 5).hits.map(\.id) == [b])
+
+        // Similar images follow the image slot once the similar slot is turned off.
+        try await rt.service.deactivateModel(slot: .similar)
+        #expect(await rt.service.activeModelManifest(slot: .image)?.id == "siglip2-base@1")
+        #expect(await rt.service.similarImages(to: a, limit: 5).hits.map(\.id) == [b])
+        #expect(await rt.service.imageIndexStatus(itemID: a) == .indexed)
+
+        // Text queries never use the similar slot.
+        try await rt.service.activateModel(id: "vision-featureprint@1", requireInstalled: false)
+        try await rt.service.deactivateModel(slot: .image)
+        #expect(await rt.service.search(SearchRequest(requestID: 1, text: "cat", kind: .image, semantic: true, limit: 5)).semantic == .notApplicable)
+    }
+
+    // AC26.2 — an old setting that put Apple Vision in the image slot is migrated once.
+    @Test func migratesOldImageSlotSetting() async throws {
+        let home = try makeTempHome()
+        do {
+            let db = try Database(home: home)
+            try await db.setSetting(SettingKey.activeModel, "vision-featureprint@1")
+        }
+        for _ in 0..<2 {
+            let rt = try await Runtime.open(home: home, services: services, startWorker: false, requireInstalledModel: false, sweepTmp: false)
+            #expect(await rt.service.activeModelManifest(slot: .similar)?.id == "vision-featureprint@1")
+            #expect(await rt.service.activeModelManifest(slot: .image) == nil)
+            #expect(try await rt.db.setting(SettingKey.activeModel) == nil)
+            #expect(try await rt.db.setting(SettingKey.activeSimilarModel) == "vision-featureprint@1")
+        }
+    }
+}

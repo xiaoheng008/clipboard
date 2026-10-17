@@ -117,7 +117,9 @@ public enum Maintenance {
     public static func purgeInactive(_ rt: Runtime, scope: MaintenanceScope) async throws -> PurgeReport {
         var r = PurgeReport()
         // Both slots' active models are protected (FR20).
-        r.active = [await rt.service.activeModelManifest(slot: .image)?.id, await rt.service.activeModelManifest(slot: .text)?.id].compactMap { $0 }
+        var active: [String] = []
+        for slot in ModelSlot.allCases { if let id = await rt.service.activeModelManifest(slot: slot)?.id { active.append(id) } }
+        r.active = active
         r.byModel = try await rt.db.embeddingCounts().filter { !r.active.contains($0.key) }
         switch scope {
         case .dryRun: break

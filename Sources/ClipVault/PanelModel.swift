@@ -47,7 +47,7 @@ final class PanelModel {
             guard selectedRow?.id == id else { return }
             similar = r.hits.map { Row(item: $0.item, sources: $0.sources, similarity: $0.similarity) }
             similarNote = similar.isEmpty ? "没有相似图片" : nil
-        case .noModel: similarNote = "启用图片搜索模型后可显示相似图片"
+        case .noModel: similarNote = "启用图片搜索模型或相似图片模型后可显示相似图片"
         case .slotBusy(let target): similarNote = "正在启用 \(target)…"
         case .queued: similarNote = "正在排队建立索引…"
         case .running: similarNote = "正在建立索引…"
