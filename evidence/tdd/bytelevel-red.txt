@@ -1,0 +1,5 @@
+   [0;36m|[0;0m                                                                                   `- [1;31merror: [1;39mextra argument 'padLeft' in call[0;0m
+error: Build failed
+error: fatalError
+Tests/ClipCoreTests/HFTokenizerTests.swift failed with a nonzero exit code. Command line:     cd /Users/xiaoheng/Program/app
+Tests/ClipCoreTests/HFTokenizerTests.swift:92:95: [1;31merror: [1;39mextra argument 'padLeft' in call[0;0m

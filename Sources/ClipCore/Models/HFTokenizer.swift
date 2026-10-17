@@ -1,8 +1,19 @@
 import Foundation
 
 /// A subset of HuggingFace `tokenizer.json`, enough for the multilingual models we ship:
-/// Gemma (SigLIP2: BPE + byte fallback) and XLM-R (multilingual-e5: Unigram + Metaspace).
+/// Gemma (SigLIP2 / EmbeddingGemma: BPE + byte fallback), XLM-R (multilingual-e5: Unigram + Metaspace)
+/// and byte-level BPE (Granite, Qwen3: regex split + ByteLevel).
 /// Parity with the Python `tokenizers` library is pinned by HFTokenizerTests.
+/// Dictionary key compared byte-for-byte. Swift String equality uses Unicode canonical equivalence,
+/// so e.g. U+884C 行 and the compatibility ideograph U+FA08 行 would collide — but they are different
+/// tokens with different ids in real vocabularies (Gemma 3). Tokenizers must compare exact UTF-8.
+struct ExactKey: Hashable {
+    let s: String
+    init(_ s: String) { self.s = s }
+    static func == (a: ExactKey, b: ExactKey) -> Bool { a.s.utf8.elementsEqual(b.s.utf8) }
+    func hash(into h: inout Hasher) { for b in s.utf8 { h.combine(b) } }
+}
+
 public final class HFTokenizer: @unchecked Sendable {
     public enum LoadError: Error, CustomStringConvertible {
         case unsupported(String)
@@ -20,19 +31,22 @@ public final class HFTokenizer: @unchecked Sendable {
         case replaceRegex(NSRegularExpression, String)
         case nfkcWhitespace                  // approximation of SentencePiece "Precompiled" (nmt_nfkc)
         case nfkc
+        case nfc
         case lowercase
         case prepend(String)
     }
 
     enum PreTokenizer {
         case splitMergedWithPrevious(String)
+        case splitIsolated(NSRegularExpression)        // matches and the gaps between them become pieces
+        case byteLevel(addPrefixSpace: Bool, useRegex: Bool)
         case metaspace(String, prefix: Bool)
         case whitespaceSplit
     }
 
     enum Model {
-        case bpe(vocab: [String: Int], ranks: [String: Int], byteFallback: Bool, unk: Int?)
-        case unigram(pieces: [String: (id: Int, score: Double)], maxLength: Int, unk: Int, unkScore: Double)
+        case bpe(vocab: [ExactKey: Int], ranks: [ExactKey: Int], byteFallback: Bool, unk: Int?, ignoreMerges: Bool)
+        case unigram(pieces: [ExactKey: (id: Int, score: Double)], maxLength: Int, unk: Int, unkScore: Double)
     }
 
     private let normalizers: [Normalizer]
@@ -64,24 +78,29 @@ public final class HFTokenizer: @unchecked Sendable {
         guard let m = root["model"] as? [String: Any], let type = m["type"] as? String else { throw LoadError.malformed("model") }
         switch type {
         case "BPE":
-            guard let vocab = m["vocab"] as? [String: Int], let merges = m["merges"] as? [Any] else { throw LoadError.malformed("BPE") }
-            var ranks: [String: Int] = [:]
+            // NSDictionary keys from JSONSerialization are compared literally (NSString), so no entry is lost here.
+            guard let rawVocab = m["vocab"] as? NSDictionary, let merges = m["merges"] as? [Any] else { throw LoadError.malformed("BPE") }
+            var vocab: [ExactKey: Int] = [:]
+            vocab.reserveCapacity(rawVocab.count)
+            for (k, v) in rawVocab { if let k = k as? String, let v = v as? Int { vocab[ExactKey(k)] = v } }
+            var ranks: [ExactKey: Int] = [:]
             ranks.reserveCapacity(merges.count)
             for (i, item) in merges.enumerated() {
-                if let pair = item as? [String], pair.count == 2 { ranks[pair[0] + " " + pair[1]] = i }
-                else if let s = item as? String { ranks[s] = i }
+                if let pair = item as? [String], pair.count == 2 { ranks[ExactKey(pair[0] + " " + pair[1])] = i }
+                else if let s = item as? String { ranks[ExactKey(s)] = i }
             }
-            let unk = (m["unk_token"] as? String).flatMap { vocab[$0] }
-            model = .bpe(vocab: vocab, ranks: ranks, byteFallback: m["byte_fallback"] as? Bool ?? false, unk: unk)
+            let unk = (m["unk_token"] as? String).flatMap { vocab[ExactKey($0)] }
+            model = .bpe(vocab: vocab, ranks: ranks, byteFallback: m["byte_fallback"] as? Bool ?? false, unk: unk,
+                         ignoreMerges: m["ignore_merges"] as? Bool ?? false)
         case "Unigram":
             guard let vocab = m["vocab"] as? [[Any]] else { throw LoadError.malformed("Unigram") }
-            var pieces: [String: (Int, Double)] = [:]
+            var pieces: [ExactKey: (Int, Double)] = [:]
             pieces.reserveCapacity(vocab.count)
             var maxLen = 1
             var minScore = Double.infinity
             for (i, entry) in vocab.enumerated() {
                 guard let piece = entry.first as? String, let score = (entry.last as? NSNumber)?.doubleValue else { continue }
-                pieces[piece] = (i, score)
+                pieces[ExactKey(piece)] = (i, score)
                 maxLen = max(maxLen, piece.count)
                 minScore = min(minScore, score)
             }
@@ -106,6 +125,7 @@ public final class HFTokenizer: @unchecked Sendable {
             throw LoadError.malformed("Replace pattern")
         case "Precompiled": return [.nfkcWhitespace]
         case "NFKC": return [.nfkc]
+        case "NFC": return [.nfc]
         case "Lowercase": return [.lowercase]
         case "Prepend": return [.prepend(n["prepend"] as? String ?? "")]
         default: throw LoadError.unsupported("normalizer \(type)")
@@ -117,10 +137,15 @@ public final class HFTokenizer: @unchecked Sendable {
         switch type {
         case "Sequence": return try (p["pretokenizers"] as? [Any] ?? []).flatMap { try parsePreTokenizers($0) }
         case "Split":
-            guard let pattern = (p["pattern"] as? [String: Any])?["String"] as? String, p["behavior"] as? String == "MergedWithPrevious" else {
-                throw LoadError.unsupported("Split variant")
+            let pattern = p["pattern"] as? [String: Any]
+            let behavior = p["behavior"] as? String
+            if let literal = pattern?["String"] as? String, behavior == "MergedWithPrevious" { return [.splitMergedWithPrevious(literal)] }
+            if let regex = pattern?["Regex"] as? String, behavior == "Isolated", p["invert"] as? Bool != true {
+                return [.splitIsolated(try NSRegularExpression(pattern: regex))]
             }
-            return [.splitMergedWithPrevious(pattern)]
+            throw LoadError.unsupported("Split \(behavior ?? "?")")
+        case "ByteLevel":
+            return [.byteLevel(addPrefixSpace: p["add_prefix_space"] as? Bool ?? false, useRegex: p["use_regex"] as? Bool ?? true)]
         case "Metaspace":
             let scheme = p["prepend_scheme"] as? String
             let prefix = scheme.map { $0 != "never" } ?? (p["add_prefix_space"] as? Bool ?? true)
@@ -131,7 +156,17 @@ public final class HFTokenizer: @unchecked Sendable {
     }
 
     private static func parsePost(_ any: Any?, _ added: Any?) throws -> ([Int], [Int]) {
-        guard let p = any as? [String: Any] else { return ([], []) }
+        guard var p = any as? [String: Any] else { return ([], []) }
+        // Sequence(ByteLevel, TemplateProcessing): ByteLevel only adjusts offsets; use the template.
+        if p["type"] as? String == "Sequence" {
+            let parts = p["processors"] as? [[String: Any]] ?? []
+            guard let template = parts.first(where: { $0["type"] as? String == "TemplateProcessing" }) else {
+                if parts.allSatisfy({ $0["type"] as? String == "ByteLevel" }) { return ([], []) }
+                throw LoadError.unsupported("post Sequence")
+            }
+            p = template
+        }
+        if p["type"] as? String == "ByteLevel" { return ([], []) }
         guard p["type"] as? String == "TemplateProcessing", let single = p["single"] as? [[String: Any]] else {
             throw LoadError.unsupported("post_processor \(p["type"] ?? "?")")
         }
@@ -158,13 +193,14 @@ public final class HFTokenizer: @unchecked Sendable {
     }
 
     /// `encode` truncated to `length` (keeping the suffix specials) and right-padded with `padID`.
-    public func contextIDs(_ text: String, length: Int, padID: Int) -> [Int] {
+    public func contextIDs(_ text: String, length: Int, padID: Int, padLeft: Bool = false) -> [Int] {
         var body = encodeBody(text)
         let room = length - prefixIDs.count - suffixIDs.count
         if body.count > room { body = Array(body.prefix(max(room, 0))) }
-        var ids = prefixIDs + body + suffixIDs
-        if ids.count < length { ids += [Int](repeating: padID, count: length - ids.count) }
-        return ids
+        let ids = prefixIDs + body + suffixIDs
+        guard ids.count < length else { return ids }
+        let pad = [Int](repeating: padID, count: length - ids.count)
+        return padLeft ? pad + ids : ids + pad          // Qwen3 (last-token pooling) expects left padding
     }
 
     /// Number of real tokens `encode` would produce (for attention masks).
@@ -188,6 +224,7 @@ public final class HFTokenizer: @unchecked Sendable {
         case let .replaceRegex(re, b):
             return re.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: NSRegularExpression.escapedTemplate(for: b))
         case .nfkc: return s.precomposedStringWithCompatibilityMapping
+        case .nfc: return s.precomposedStringWithCanonicalMapping
         case .lowercase: return s.lowercased()
         case .prepend(let p): return s.isEmpty ? s : p + s
         case .nfkcWhitespace:
@@ -226,7 +263,31 @@ public final class HFTokenizer: @unchecked Sendable {
             return out
         case .whitespaceSplit:
             return s.split(whereSeparator: \.isWhitespace).map(String.init)
+        case .splitIsolated(let re):
+            return Self.isolate(s, re)
+        case let .byteLevel(addPrefixSpace, useRegex):
+            var t = s
+            if addPrefixSpace && !t.hasPrefix(" ") { t = " " + t }
+            let pieces = useRegex ? Self.isolate(t, Self.gpt2Pattern) : [t]
+            return pieces.map { piece in String(piece.utf8.map { Self.byteToUnicode[$0]! }) }
         }
+    }
+
+    static let byteToUnicode = CLIPTokenizer.makeByteToUnicode()
+    static let gpt2Pattern = try! NSRegularExpression(pattern: #"'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"#)
+
+    /// Regex matches and the text between them, in order (HF "Isolated").
+    static func isolate(_ s: String, _ re: NSRegularExpression) -> [String] {
+        let ns = s as NSString
+        var out: [String] = []
+        var cursor = 0
+        for m in re.matches(in: s, range: NSRange(location: 0, length: ns.length)) where m.range.length > 0 {
+            if m.range.location > cursor { out.append(ns.substring(with: NSRange(location: cursor, length: m.range.location - cursor))) }
+            out.append(ns.substring(with: m.range))
+            cursor = m.range.location + m.range.length
+        }
+        if cursor < ns.length { out.append(ns.substring(from: cursor)) }
+        return out
     }
 
     private func cachedModel(_ word: String) -> [Int] {
@@ -235,35 +296,37 @@ public final class HFTokenizer: @unchecked Sendable {
         lock.unlock()
         let ids: [Int]
         switch model {
-        case let .bpe(vocab, ranks, byteFallback, unk): ids = bpe(word, vocab, ranks, byteFallback, unk)
+        case let .bpe(vocab, ranks, byteFallback, unk, ignoreMerges):
+            if ignoreMerges, let id = vocab[ExactKey(word)] { ids = [id] } else { ids = bpe(word, vocab, ranks, byteFallback, unk) }
         case let .unigram(pieces, maxLength, unk, unkScore): ids = viterbi(word, pieces, maxLength, unk, unkScore)
         }
         lock.lock(); if cache.count > 8192 { cache.removeAll() }; cache[word] = ids; lock.unlock()
         return ids
     }
 
-    private func bpe(_ word: String, _ vocab: [String: Int], _ ranks: [String: Int], _ byteFallback: Bool, _ unk: Int?) -> [Int] {
-        var symbols = word.map(String.init)
+    private func bpe(_ word: String, _ vocab: [ExactKey: Int], _ ranks: [ExactKey: Int], _ byteFallback: Bool, _ unk: Int?) -> [Int] {
+        // Symbols are unicode scalars (not grapheme clusters / canonical-equivalent Characters).
+        var symbols = word.unicodeScalars.map { String($0) }
         while symbols.count > 1 {
             var best: (rank: Int, i: Int)?
             for i in 0..<(symbols.count - 1) {
-                if let r = ranks[symbols[i] + " " + symbols[i + 1]], r < (best?.rank ?? .max) { best = (r, i) }
+                if let r = ranks[ExactKey(symbols[i] + " " + symbols[i + 1])], r < (best?.rank ?? .max) { best = (r, i) }
             }
             guard let b = best else { break }
-            let a = symbols[b.i], c = symbols[b.i + 1]
+            let a = ExactKey(symbols[b.i]), c = ExactKey(symbols[b.i + 1])
             var merged: [String] = []
             var i = 0
             while i < symbols.count {
-                if i < symbols.count - 1 && symbols[i] == a && symbols[i + 1] == c { merged.append(a + c); i += 2 }
+                if i < symbols.count - 1 && ExactKey(symbols[i]) == a && ExactKey(symbols[i + 1]) == c { merged.append(symbols[i] + symbols[i + 1]); i += 2 }
                 else { merged.append(symbols[i]); i += 1 }
             }
             symbols = merged
         }
         var ids: [Int] = []
         for sym in symbols {
-            if let id = vocab[sym] { ids.append(id); continue }
+            if let id = vocab[ExactKey(sym)] { ids.append(id); continue }
             if byteFallback {
-                let bytes = sym.utf8.compactMap { vocab[String(format: "<0x%02X>", $0)] }
+                let bytes = sym.utf8.compactMap { vocab[ExactKey(String(format: "<0x%02X>", $0))] }
                 if bytes.count == sym.utf8.count { ids += bytes; continue }
             }
             if let unk { ids.append(unk) }
@@ -272,7 +335,7 @@ public final class HFTokenizer: @unchecked Sendable {
     }
 
     /// Best-scoring segmentation; characters no piece covers become (fused) unk.
-    private func viterbi(_ word: String, _ pieces: [String: (id: Int, score: Double)], _ maxLength: Int, _ unk: Int, _ unkScore: Double) -> [Int] {
+    private func viterbi(_ word: String, _ pieces: [ExactKey: (id: Int, score: Double)], _ maxLength: Int, _ unk: Int, _ unkScore: Double) -> [Int] {
         let chars = Array(word)
         let n = chars.count
         var best = [Double](repeating: -.infinity, count: n + 1)
@@ -283,7 +346,7 @@ public final class HFTokenizer: @unchecked Sendable {
             var piece = ""
             for end in (start + 1)...min(n, start + maxLength) {
                 piece.append(chars[end - 1])
-                guard let p = pieces[piece] else { continue }
+                guard let p = pieces[ExactKey(piece)] else { continue }
                 if end == start + 1 { coveredSingle = true }
                 let s = best[start] + p.score
                 if s > best[end] { best[end] = s; back[end] = (start, p.id) }

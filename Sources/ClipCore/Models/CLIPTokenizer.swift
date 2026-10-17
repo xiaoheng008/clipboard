@@ -6,23 +6,25 @@ public final class CLIPTokenizer: @unchecked Sendable {
     public static let startOfText = 49406
     public static let endOfText = 49407
 
-    private let encoder: [String: Int]
-    private let ranks: [String: Int]          // "a b" → merge rank
+    private let encoder: [ExactKey: Int]       // byte-exact keys (see ExactKey)
+    private let ranks: [ExactKey: Int]         // "a b" → merge rank
     private let byteToUnicode: [UInt8: Character]
     private let pattern: NSRegularExpression
     private var cache: [String: [Int]] = [:]
     private let lock = NSLock()
 
     public init(vocabURL: URL, mergesURL: URL) throws {
-        let vocab = try JSONDecoder().decode([String: Int].self, from: Data(contentsOf: vocabURL))
+        let raw = try JSONSerialization.jsonObject(with: Data(contentsOf: vocabURL)) as? NSDictionary ?? [:]
+        var vocab: [ExactKey: Int] = [:]
+        for (k, v) in raw { if let k = k as? String, let v = v as? Int { vocab[ExactKey(k)] = v } }
         encoder = vocab
         let lines = try String(contentsOf: mergesURL, encoding: .utf8).split(separator: "\n", omittingEmptySubsequences: true)
-        var r: [String: Int] = [:]
+        var r: [ExactKey: Int] = [:]
         var rank = 0
         for line in lines.dropFirst() {   // first line is "#version"
             let parts = line.split(separator: " ")
             guard parts.count == 2 else { continue }
-            r["\(parts[0]) \(parts[1])"] = rank
+            r[ExactKey("\(parts[0]) \(parts[1])")] = rank
             rank += 1
         }
         ranks = r
@@ -73,7 +75,7 @@ public final class CLIPTokenizer: @unchecked Sendable {
         while word.count > 1 {
             var best: (rank: Int, i: Int)?
             for i in 0..<(word.count - 1) {
-                if let r = ranks[word[i] + " " + word[i + 1]], r < (best?.rank ?? .max) { best = (r, i) }
+                if let r = ranks[ExactKey(word[i] + " " + word[i + 1])], r < (best?.rank ?? .max) { best = (r, i) }
             }
             guard let b = best else { break }
             let a = word[b.i], c = word[b.i + 1]
@@ -85,7 +87,7 @@ public final class CLIPTokenizer: @unchecked Sendable {
             }
             word = merged
         }
-        let ids = word.compactMap { encoder[$0] }
+        let ids = word.compactMap { encoder[ExactKey($0)] }
         lock.lock(); if cache.count > 4096 { cache.removeAll() }; cache[token] = ids; lock.unlock()
         return ids
     }
