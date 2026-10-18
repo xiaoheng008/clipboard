@@ -1,0 +1,27 @@
+# AC4.3 故障注入：导入中途 kill -9（2026-10-18，release 包 dist/ClipVault.app，一次性库 CLIPVAULT_HOME）
+
+AC4.3 kill -9 during --import of 2000 distinct PNGs (full import takes ~1.6 s); fresh library each round
+round  1: killed at 0.38s (status 137) items=426 blobFiles=426 | verify[0] items=426 fts=426 integrity=ok missingBlobs=0 | orphan blobs: 0
+round  2: killed at 0.37s (status 137) items=487 blobFiles=488 | verify[0] items=487 fts=487 integrity=ok missingBlobs=0 | orphan blobs: 0
+round  3: killed at 0.80s (status 137) items=932 blobFiles=933 | verify[0] items=932 fts=932 integrity=ok missingBlobs=0 | orphan blobs: 0
+round  4: killed at 0.63s (status 137) items=807 blobFiles=808 | verify[0] items=807 fts=807 integrity=ok missingBlobs=0 | orphan blobs: 0
+round  5: killed at 0.39s (status 137) items=533 blobFiles=534 | verify[0] items=533 fts=533 integrity=ok missingBlobs=0 | orphan blobs: 0
+round  6: killed at 0.35s (status 137) items=444 blobFiles=444 | verify[0] items=444 fts=444 integrity=ok missingBlobs=0 | orphan blobs: 0
+round  7: killed at 0.79s (status 137) items=1032 blobFiles=1032 | verify[0] items=1032 fts=1032 integrity=ok missingBlobs=0 | orphan blobs: 0
+round  8: killed at 0.37s (status 137) items=499 blobFiles=499 | verify[0] items=499 fts=499 integrity=ok missingBlobs=0 | orphan blobs: 0
+round  9: killed at 0.84s (status 137) items=1092 blobFiles=1092 | verify[0] items=1092 fts=1092 integrity=ok missingBlobs=0 | orphan blobs: 0
+round 10: killed at 1.01s (status 137) items=1263 blobFiles=1263 | verify[0] items=1263 fts=1263 integrity=ok missingBlobs=0 | orphan blobs: 0
+round 11: killed at 0.41s (status 137) items=528 blobFiles=528 | verify[0] items=528 fts=528 integrity=ok missingBlobs=0 | orphan blobs: 0
+round 12: killed at 0.52s (status 137) items=688 blobFiles=688 | verify[0] items=688 fts=688 integrity=ok missingBlobs=0 | orphan blobs: 0
+after re-import: items=2000 fts=2000 integrity=ok missingBlobs=0 | orphan blobs: 0
+
+定点复现（多出的一个文件是什么）：
+items=642 files=643 → unreferenced: tmp/blob-<uuid>（写到一半的临时文件，未改名进 blobs/）
+
+结论（逐条读）:
+- 12 轮强杀均落在导入中途（426–1263 / 2000 条）；每轮 --verify 退出 0：条目数 = 索引行数，完整性 ok，缺失图片 0。
+- 4 轮多出 1 个文件，均为 tmp/ 下写到一半的临时文件（BlobStore 先写 tmp 再改名）；App 启动时
+  cleanTmp 删除 6 小时以上的临时文件（MaintenanceTests 覆盖），CLI 不清扫（R3：可能与 App 并行）。
+- 「已改名进 blobs/ 但事务未提交」的孤儿在 22 轮中未命中（窗口只有 rename→commit 之间）；即便出现，
+  gc 也只统计 10 分钟以上的孤儿（R4 minAge=600 s），所以强杀后立刻 --gc --dry-run 报 0 是设计内行为。
+- 强杀后重新导入同一批 2000 张：items=2000、孤儿 0，续接无重复。

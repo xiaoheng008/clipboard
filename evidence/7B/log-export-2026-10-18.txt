@@ -1,0 +1,9 @@
+# AC16.1 日志导出（真实库，2026-10-18）
+
+命令: ClipVault --export-logs <dir>  → exit 0
+导出文件: clipvault.log (33513 B), slow-ops.txt (4355 B)
+
+内容泄露扫描（只读真实库，取每条文本 / OCR 文本前 24 字作探针，在导出日志里查找；只输出计数）:
+log bytes=37816 lines=477
+item text probes=51 found_in_logs=0
+ocr text probes=11 found_in_logs=0
