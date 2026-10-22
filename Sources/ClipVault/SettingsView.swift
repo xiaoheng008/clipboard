@@ -29,6 +29,9 @@ final class SettingsModel {
     var newExcluded = ""
     var confirmClear = false
     var confirmPurge = false
+    /// Selected settings tab; switches are timed into the log (user report: tabs feel stuck after a click).
+    var tab = "general"
+    @ObservationIgnored var tabTiming = TabSwitchTiming()
     @ObservationIgnored var keyMonitor: Any?
     var onHotkeyChanged: ((HotKeyCombo?) -> Bool)?
     var probes: () async -> PlatformProbes = { .unavailable }
@@ -44,6 +47,23 @@ final class SettingsModel {
     func recommendedID(_ slot: ModelSlot) -> String? { rt.service.catalog.recommended(memoryGB: memoryGB, slot: slot)?.id }
     func installed(_ m: ModelManifest) -> Bool { ModelPaths.isInstalled(home: rt.home, model: m) }
     func slotBusy(_ slot: ModelSlot) -> Bool { if case .activating = slotStates[slot] { true } else { false } }
+
+    func tabChanged(to tab: String) {
+        let now = ProcessInfo.processInfo.systemUptime
+        // The click that caused it, if the current event is one (event timestamps are system uptime).
+        let click = NSApp.currentEvent.flatMap { e in [.leftMouseDown, .leftMouseUp].contains(e.type) && now - e.timestamp < 5 ? e.timestamp : nil }
+        tabTiming.begin(to: tab, clickUptime: click, now: now)
+    }
+
+    func tabAppeared(_ tab: String) {
+        guard tabTiming.appeared(tab, now: ProcessInfo.processInfo.systemUptime) else { return }
+        DispatchQueue.main.async { [self] in       // next main-queue turn: layout and drawing are committed
+            guard let r = tabTiming.settled(now: ProcessInfo.processInfo.systemUptime) else { return }
+            Log.shared.event("settings.tab_switch", ["tab": .label(r.tab), "click_ms": .int(Int64(r.clickToChangeMs ?? -1)),
+                                                     "appear_ms": .int(Int64(r.changeToAppearMs)), "settle_ms": .int(Int64(r.appearToSettledMs)),
+                                                     "total_ms": .int(Int64(r.totalMs))])
+        }
+    }
 
     func reload() async {
         let stored = try? await rt.db.setting(SettingKey.hotkey)
@@ -200,11 +220,15 @@ struct SettingsView: View {
     @Bindable var model: SettingsModel
 
     var body: some View {
-        TabView {
-            GeneralTab(model: model).tabItem { Label("通用", systemImage: "gearshape") }
-            ModelsTab(model: model).tabItem { Label("模型", systemImage: "cpu") }
-            DiagnosticsTab(model: model).tabItem { Label("诊断", systemImage: "stethoscope") }
+        TabView(selection: $model.tab) {
+            GeneralTab(model: model).tabItem { Label("通用", systemImage: "gearshape") }.tag("general")
+                .onAppear { model.tabAppeared("general") }
+            ModelsTab(model: model).tabItem { Label("模型", systemImage: "cpu") }.tag("models")
+                .onAppear { model.tabAppeared("models") }
+            DiagnosticsTab(model: model).tabItem { Label("诊断", systemImage: "stethoscope") }.tag("diagnostics")
+                .onAppear { model.tabAppeared("diagnostics") }
         }
+        .onChange(of: model.tab) { _, new in model.tabChanged(to: new) }
         .padding(16)
         .frame(width: 640, height: 520)
         .task { await model.reload() }
