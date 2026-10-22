@@ -95,7 +95,11 @@ $ClipVault --help                   # 全部命令
 
 ```sh
 scripts/test.sh      # 运行全部测试（Swift Testing）
+scripts/build-app.sh # 从干净目录构建 dist/ClipVault.app
+scripts/build-dmg.sh # 构建并校验 dist/ClipVault-<版本>.dmg（拖进「应用程序」安装）
 ```
+
+dmg 里的 App 只有本机临时签名（ad-hoc）：其他 Mac 首次打开需右键 › 打开；要双击即开，需要 Developer ID 签名并经 Apple 公证。
 
 项目按 [scv-app](docs/scv/) 方法开发：需求、架构、数据契约、状态机、验收用例和验证证据分别在 `docs/scv/` 与 `evidence/`。已知限制见 `docs/scv/9.2-known-limitations.md`。
 
