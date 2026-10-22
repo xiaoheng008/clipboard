@@ -169,3 +169,31 @@ actor FakeIndex: VectorIndex {
         #expect(Diagnostics.diskStatus(freeBytes: free) == expected)
     }
 }
+
+/// Energy: the idle loop must sleep between ticks. A wait that timed out must not break later waits
+/// (cancelling a task that awaits an AsyncStream finishes the stream → every later wait returned at once).
+@Suite struct IndexWorkerLoopTests {
+    @Test func idleLoopSleepsBetweenTicks() async throws {
+        let db = try Database(home: try makeTempHome())
+        let worker = IndexWorker(db: db, blobs: BlobStore(home: db.home), ocr: FakeOCR())
+        let loop = Task { await worker.runLoop(tick: .milliseconds(50)) }
+        try await Task.sleep(for: .milliseconds(500))           // ≈ 10 timed-out waits
+        let passes = await worker.loopPasses
+        loop.cancel()
+        #expect(passes <= 20, "drain passes in 500 ms idle: \(passes)")
+    }
+
+    @Test func wakeStillWorksAfterTimeouts() async throws {
+        let db = try Database(home: try makeTempHome())
+        let worker = IndexWorker(db: db, blobs: BlobStore(home: db.home), ocr: FakeOCR())
+        let loop = Task { await worker.runLoop(tick: .milliseconds(400)) }
+        try await Task.sleep(for: .milliseconds(450))           // one wait has timed out
+        let before = await worker.loopPasses
+        let (id, _) = try await JobQueueTests().imageItem(db, seed: 7)
+        await worker.wake()
+        try await Task.sleep(for: .milliseconds(150))           // well before the next tick (≈ 800 ms)
+        loop.cancel()
+        #expect(await worker.loopPasses == before + 1)
+        #expect(try await db.item(id: id)?.ocrText?.hasPrefix("识别文字") == true)
+    }
+}

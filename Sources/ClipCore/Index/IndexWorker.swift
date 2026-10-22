@@ -17,11 +17,17 @@ public actor IndexWorker {
     let leaseMs: Int64
     /// One embedding backend per slot (FR20).
     var backends: [ModelSlot: (provider: EmbeddingProvider, index: VectorIndex?)] = [:]
-    private var wakeContinuation: AsyncStream<Void>.Continuation?
+    /// Doorbell for `runLoop`: a wake while nobody waits is remembered (`pendingWake`); `waitGeneration`
+    /// keeps a stale timeout from ending a later wait.
+    private var pendingWake = false
+    private var waiter: CheckedContinuation<Void, Never>?
+    private var waitGeneration = 0
     private var progress: (@Sendable () -> Void)?
 
     public func setProgressHandler(_ h: (@Sendable () -> Void)?) { progress = h }
     private var running = false
+    /// Drain passes made by `runLoop` (energy: an idle loop must sleep, not spin).
+    private(set) var loopPasses = 0
 
     public init(db: Database, blobs: BlobStore, ocr: OCRProvider?, maxAttempts: Int = 3, leaseMs: Int64 = 120_000) {
         self.db = db; self.blobs = blobs; self.ocr = ocr; self.maxAttempts = maxAttempts; self.leaseMs = leaseMs
@@ -104,19 +110,39 @@ public actor IndexWorker {
     public func runLoop(tick: Duration = .seconds(5)) async {
         guard !running else { return }
         running = true
-        let (stream, cont) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
-        wakeContinuation = cont
         while !Task.isCancelled {
+            loopPasses += 1
             _ = await drain()
-            await withTaskGroup(of: Void.self) { g in
-                g.addTask { var it = stream.makeAsyncIterator(); _ = await it.next() }
-                g.addTask { try? await Task.sleep(for: tick) }
-                await g.next()
-                g.cancelAll()
-            }
+            await sleep(upTo: tick)
         }
         running = false
     }
 
-    public func wake() { wakeContinuation?.yield() }
+    public func wake() {
+        if let w = waiter { waiter = nil; w.resume() } else { pendingWake = true }
+    }
+
+    /// Returns on `wake()`, after `tick`, or on cancellation. No AsyncStream here: cancelling a task that
+    /// awaits a stream finishes the stream, and every later wait then returned at once (idle loop at 130 % CPU).
+    private func sleep(upTo tick: Duration) async {
+        if pendingWake { pendingWake = false; return }
+        waitGeneration += 1
+        let g = waitGeneration
+        let timer = Task { [weak self] in
+            try? await Task.sleep(for: tick)
+            await self?.endWait(g)
+        }
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { waiter = $0 }
+        } onCancel: {
+            Task { [weak self] in await self?.endWait(g) }
+        }
+        timer.cancel()
+    }
+
+    private func endWait(_ g: Int) {
+        guard g == waitGeneration, let w = waiter else { return }
+        waiter = nil
+        w.resume()
+    }
 }

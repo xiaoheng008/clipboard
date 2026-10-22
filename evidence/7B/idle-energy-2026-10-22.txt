@@ -1,0 +1,10 @@
+# 空闲能耗：修复前后（2026-10-22，Apple M4 / macOS 27.0.1，dist/ClipVault.app，真实库，无前台操作）
+# 方法：open 后等 15 s，top -l 16 -s 4 -pid <pid> -stats pid,cpu,idlew,power,threads,mem（共 60 s）
+
+## 修复前（7f9311b 时的包）
+CPU 114.6 → 稳定在 125.7–130.0 %；POWER 同值（≈130）；内存 245 MB
+sample 5 s：IndexWorker.runLoop(tick:) 1634 样本，其中 Database.claimJobs 1505（SQL 解析 / 规划占大头）
+
+## 修复后（门铃式等待）
+CPU 0.0–0.1 %；POWER 0.0–0.1；60 s 内累计唤醒 34 次（idlew 3 → 34）；内存 130 MB
+单测：IndexWorkerLoopTests——空闲 500 ms 的循环轮数 14205（红）→ ≤ 20（绿）；超时后 wake() 仍在下一次超时前处理新任务
