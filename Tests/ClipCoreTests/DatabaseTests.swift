@@ -190,6 +190,19 @@ import Testing
         #expect(offenders == [])
     }
 
+    // Selectable text inside a grouped Form made the settings tabs stick on switch (user report, since 8a03e99).
+    // Selectable text belongs in a ScrollView (diagnostics, panel detail), never in a `.formStyle(.grouped)` view.
+    @Test func noSelectableTextInGroupedForms() {
+        var offenders: [String] = []
+        for f in swiftSources(under: "Sources/ClipVault") {
+            for view in f.text.components(separatedBy: "\nstruct ").dropFirst()
+            where view.contains(".formStyle(.grouped)") && view.contains(".textSelection(") {
+                offenders.append("\(f.path): struct \(view.prefix { $0 != ":" && $0 != " " })")
+            }
+        }
+        #expect(offenders == [])
+    }
+
     // Contract: the telemetry DDL in docs/scv/2.2 is verbatim TelemetryStore.ddl.
     @Test func telemetryDocMatchesCode() throws {
         let doc = try String(contentsOf: repoRoot.appendingPathComponent("docs/scv/2.2-data-contracts.md"), encoding: .utf8)

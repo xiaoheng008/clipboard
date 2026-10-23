@@ -287,7 +287,14 @@ struct GeneralTab: View {
             }
             Section("历史数据") {
                 Text(model.stats)
-                Text("数据位置：\(model.rt.home.root.path)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                // No .textSelection here: selectable text in a grouped Form made tab switches stick (see TrackedUITests).
+                HStack {
+                    Text("数据位置：\(model.rt.home.root.path)").font(.caption).foregroundStyle(.secondary)
+                    TrackedButton("在访达中显示", tracker: model.tracker, key: "settings.reveal_home", name: "settings.reveal_home") {
+                        NSWorkspace.shared.activateFileViewerSelecting([model.rt.home.root])
+                    }
+                    .controlSize(.small)
+                }
                 TrackedButton("清空全部历史…", tracker: model.tracker, key: "settings.clear.ask", name: "settings.clear.ask", role: .destructive) {
                     model.confirmClear = true
                 }
