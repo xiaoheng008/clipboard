@@ -93,7 +93,40 @@ final class SnapshotRunner: NSObject, NSApplicationDelegate {
                 sw.contentView = nil
             }
         }
+        try await tabSwitches(settings)
         print("snapshots written to \(outDir.path)")
+    }
+
+    /// The real SettingsView (TabView included) in a key, titled window, switched tab by tab the way clicks do.
+    /// Selectable text in a grouped Form froze 模型 → 通用 only in a key window (0.2.2), which borderless,
+    /// non-key snapshots never reach. A main thread silent for 5 s exits 2: the hang fails the run instead of
+    /// freezing it. Takes keyboard focus for a few seconds (the window itself is fully transparent).
+    private func tabSwitches(_ settings: SettingsModel) async throws {
+        let beat = Heartbeat()
+        let watchdog = Thread {
+            while true {
+                Thread.sleep(forTimeInterval: 0.5)
+                if beat.staleSeconds > 5 { print("tab switch hang: main thread unresponsive since \(beat.label)"); exit(2) }
+            }
+        }
+        watchdog.start()
+        NSApp.setActivationPolicy(.accessory)
+        let sw = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 520), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        sw.isReleasedWhenClosed = false
+        sw.alphaValue = 0
+        sw.contentView = NSHostingView(rootView: SettingsView(model: settings))
+        NSApp.activate()
+        sw.makeKeyAndOrderFront(nil)
+        for tab in ["models", "general", "diagnostics", "models", "general"] {
+            beat.mark("→ \(tab)")
+            settings.tab = tab
+            for _ in 0..<10 { try await Task.sleep(for: .milliseconds(100)); beat.mark("→ \(tab)") }
+            sw.contentView?.layoutSubtreeIfNeeded()
+            sw.displayIfNeeded()
+            print("  tab switch → \(tab) ok  key=\(sw.isKeyWindow)")
+        }
+        sw.orderOut(nil)
+        sw.contentView = nil
     }
 
     private static func offscreenWindow(size: NSSize, appearance: NSAppearance?) -> NSWindow {
@@ -119,6 +152,16 @@ final class SnapshotRunner: NSObject, NSApplicationDelegate {
         try png.write(to: outDir.appendingPathComponent("\(name).png"))
         print("  \(name).png")
     }
+}
+
+/// Last time the main thread checked in, read from the watchdog thread.
+final class Heartbeat: @unchecked Sendable {
+    private let lock = NSLock()
+    private var last = Date()
+    private var what = "start"
+    func mark(_ label: String) { lock.lock(); last = Date(); what = label; lock.unlock() }
+    var staleSeconds: Double { lock.lock(); defer { lock.unlock() }; return Date().timeIntervalSince(last) }
+    var label: String { lock.lock(); defer { lock.unlock() }; return what }
 }
 
 /// Demo library content (made up; no user data).
