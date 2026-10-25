@@ -140,6 +140,18 @@ import Testing
         let report = await Diagnostics.run(rt, probes: probes)
         #expect(report.checks.first { $0.name == "permission.pasteboard" }?.status == .fail)
     }
+
+    // AC28.4 — without Accessibility, Enter only copies: visible as a WARN (the app still works), PASS when granted.
+    @Test func accessibilityShowsInDiagnostics() async throws {
+        let rt = try await MaintenanceTests().runtime()
+        var probes = PlatformProbes.unavailable
+        probes.accessibility = false
+        let off = await Diagnostics.run(rt, probes: probes).checks.first { $0.name == "permission.accessibility" }
+        #expect(off?.status == .warn)
+        #expect(off?.observed.contains("⌘V") == true)
+        probes.accessibility = true
+        #expect(await Diagnostics.run(rt, probes: probes).checks.first { $0.name == "permission.accessibility" }?.status == .pass)
+    }
 }
 
 

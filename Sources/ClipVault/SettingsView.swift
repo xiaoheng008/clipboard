@@ -31,6 +31,8 @@ final class SettingsModel {
     var confirmPurge = false
     /// Selected settings tab; switches are timed into the log (user report: tabs feel stuck after a click).
     var tab = "general"
+    /// FR28: Accessibility granted (re-read on reload and whenever the 通用 tab appears).
+    var accessibility = AutoPaste.isTrusted
     @ObservationIgnored var tabTiming = TabSwitchTiming()
     @ObservationIgnored var keyMonitor: Any?
     var onHotkeyChanged: ((HotKeyCombo?) -> Bool)?
@@ -56,6 +58,7 @@ final class SettingsModel {
     }
 
     func tabAppeared(_ tab: String) {
+        if tab == "general" { accessibility = AutoPaste.isTrusted }
         guard tabTiming.appeared(tab, now: ProcessInfo.processInfo.systemUptime) else { return }
         DispatchQueue.main.async { [self] in       // next main-queue turn: layout and drawing are committed
             guard let r = tabTiming.settled(now: ProcessInfo.processInfo.systemUptime) else { return }
@@ -66,6 +69,7 @@ final class SettingsModel {
     }
 
     func reload() async {
+        accessibility = AutoPaste.isTrusted
         let stored = try? await rt.db.setting(SettingKey.hotkey)
         if let h = HotKeyCombo.resolve(setting: stored) { hotkeyText = h.display + (stored == nil ? "（默认）" : "") } else { hotkeyText = "未设置" }
         // R6: say so when the combination is taken (e.g. by an input method or launcher).
@@ -252,6 +256,20 @@ struct GeneralTab: View {
                 }
                 if let e = model.hotkeyError ?? model.tracker.message("settings.hotkey.record") { Text(e).foregroundStyle(.red).font(.caption) }
                 Text("默认 ⌥空格；清除后可点击菜单栏图标打开面板。").font(.caption).foregroundStyle(.secondary)
+            }
+            Section("回车粘贴") {
+                HStack {
+                    Text(model.accessibility ? "已开启：回车粘贴到打开面板前的光标处，⌘回车只复制"
+                                             : "未开启：回车只复制。需要在「系统设置 › 隐私与安全性 › 辅助功能」中允许 ClipVault")
+                        .foregroundStyle(model.accessibility ? Color.primary : Color.secondary)
+                    Spacer()
+                    if !model.accessibility {
+                        TrackedButton("去开启…", tracker: model.tracker, key: "settings.accessibility", name: "settings.accessibility") {
+                            AutoPaste.requestTrust()
+                            AutoPaste.openAccessibilitySettings()
+                        }
+                    }
+                }
             }
             Section("启动") {
                 Toggle("登录时启动 ClipVault", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))

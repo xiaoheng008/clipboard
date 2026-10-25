@@ -70,7 +70,9 @@ struct PanelView: View {
         }
         .onKeyPress(.downArrow) { model.moveSelection(1); return .handled }
         .onKeyPress(.upArrow) { model.moveSelection(-1); return .handled }
-        .onKeyPress(.return) { model.copySelected(via: "enter"); return .handled }
+        .onKeyPress(.return, phases: .down) { press in
+            model.pasteSelected(commandHeld: press.modifiers.contains(.command)); return .handled
+        }
         .onKeyPress(.escape) { model.onClose?(); return .handled }
     }
 
@@ -169,7 +171,8 @@ struct PanelView: View {
 
     private var footer: some View {
         HStack(spacing: 16) {
-            Text("↩ 复制").foregroundStyle(.secondary)
+            Text(model.pasteReady ? "↩ 粘贴 · ⌘↩ 只复制" : "↩ 复制").foregroundStyle(.secondary)
+                .help(model.pasteReady ? "粘贴到打开面板前的光标处" : "开启「辅助功能」权限后，回车可直接粘贴到原光标处")
             Text("⌘⌫ 删除").foregroundStyle(.secondary)
             Text("⌘P 置顶").foregroundStyle(.secondary)
             Text("esc 关闭").foregroundStyle(.secondary)

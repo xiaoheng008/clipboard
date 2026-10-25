@@ -16,11 +16,12 @@ public struct PlatformProbes: Sendable {
     public var watcherHeartbeatAgeSeconds: Double?
     public var hardware: String?
     public var loginItem: String?
+    public var accessibility: Bool?             // FR28: Accessibility granted (Enter pastes at the cursor)
     public static let unavailable = PlatformProbes()
     public init(pasteboardAccess: String? = nil, translation: String? = nil, hotkey: String? = nil,
-                watcherHeartbeatAgeSeconds: Double? = nil, loginItem: String? = nil, hardware: String? = nil) {
+                watcherHeartbeatAgeSeconds: Double? = nil, loginItem: String? = nil, accessibility: Bool? = nil, hardware: String? = nil) {
         self.pasteboardAccess = pasteboardAccess; self.translation = translation; self.hotkey = hotkey
-        self.watcherHeartbeatAgeSeconds = watcherHeartbeatAgeSeconds; self.loginItem = loginItem; self.hardware = hardware
+        self.watcherHeartbeatAgeSeconds = watcherHeartbeatAgeSeconds; self.loginItem = loginItem; self.accessibility = accessibility; self.hardware = hardware
     }
 }
 
@@ -124,6 +125,10 @@ public enum Diagnostics {
         add("translation.zh-en", probes.translation == nil ? .skip : (probes.translation == "installed" ? .pass : .warn),
             probes.translation ?? "not probed")
         add("hotkey", probes.hotkey == nil ? .skip : (probes.hotkey!.hasPrefix("failed") ? .fail : .pass), probes.hotkey ?? "app not running in this process")
+        if let ax = probes.accessibility {
+            add("permission.accessibility", ax ? .pass : .warn,
+                ax ? "granted → Enter pastes at the cursor" : "not granted → Enter only copies (press ⌘V yourself); System Settings › Privacy & Security › Accessibility")
+        }
         if let li = probes.loginItem {
             add("login_item", li == "requiresApproval" ? .warn : .pass, li)
         }

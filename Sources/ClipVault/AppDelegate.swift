@@ -160,6 +160,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             p.contentView = NSHostingView(rootView: PanelView(model: model))
             panel = p
         }
+        // FR28: the app in front now is where Enter pastes (the panel is non-activating, so it stays in front).
+        let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        model.pasteTarget = front == ProcessInfo.processInfo.processIdentifier ? nil : front
+        model.paste.panelIsKey = { [weak self] in self?.panel?.isKeyWindow ?? false }
         guard let panel else { return }
         if let rt { Task { await rt.service.syncWithStore() } }
         model.hotkeyDisplay = HotKeyCenter.shared.registered?.display
@@ -223,6 +227,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                               hotkey: hk,
                               watcherHeartbeatAgeSeconds: watcher?.lastPoll.map { Date().timeIntervalSince($0) },
                               loginItem: LoginItem.state.rawValue,
+                              accessibility: AutoPaste.isTrusted,
                               hardware: "\(HardwareProbe.cpuBrand), \(HardwareProbe.memoryGB) GB, \(HardwareProbe.osVersion)")
     }
 

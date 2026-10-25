@@ -116,6 +116,14 @@ final class PanelModel {
     var onOpenSettings: (() -> Void)?
     /// Display string of the registered hotkey; nil = none set (Q6 default).
     var hotkeyDisplay: String?
+    /// FR28: pid of the app the panel was opened over (AppDelegate, on open); Enter pastes there.
+    var pasteTarget: Int32?
+    /// FR28: Accessibility granted when the panel opened (footer hint: ↩ 粘贴 vs ↩ 复制).
+    var pasteReady = false
+    /// FR28 platform facts and the synthetic ⌘V (AppDelegate replaces `panelIsKey` with the real panel's state).
+    var paste = PasteFlow.Hooks(trusted: { AutoPaste.isTrusted }, secureInput: { AutoPaste.secureInputOn },
+                                frontmostPID: { AutoPaste.frontmostPID }, panelIsKey: { false },
+                                post: { AutoPaste.postCommandV() }, pause: { try? await Task.sleep(for: .milliseconds(10)) })
 
     let tracker: ActionTracker
 
@@ -274,6 +282,20 @@ final class PanelModel {
         }
     }
 
+    /// FR28 (3.4 §5): Enter copies, closes the panel, then pastes at the original cursor when PasteDecision
+    /// allows; ⌘Enter only copies. ⌘V is sent only after the copy-back succeeded (else the old content would paste).
+    func pasteSelected(commandHeld: Bool) {
+        guard let row = selectedRow else { return }
+        let name = commandHeld ? "panel.copy.cmd_enter" : "panel.paste.enter"
+        tracker.perform(key: "panel.copy", name: name, detail: String(row.id)) { [self] in
+            let decision = try await PasteFlow.run(commandHeld: commandHeld, target: pasteTarget, hooks: paste,
+                                                   copyBack: { try await service.copyBack(id: row.id) },
+                                                   close: { onClose?() })
+            Log.shared.event("panel.paste", ["result": .label(decision.detail)])
+            onCopied?(decision.message(imageItem: row.item.kind == .image))
+        }
+    }
+
     func deleteSelected(via source: String = "button") {
         guard let row = selectedRow else { return }
         let idx = rows.firstIndex { $0.id == row.id } ?? 0
@@ -334,6 +356,7 @@ final class PanelModel {
 
     func panelDidOpen() {
         focusToken += 1
+        pasteReady = paste.trusted()
         startWatchingCommandKey()
         query = ""
         kind = .all
