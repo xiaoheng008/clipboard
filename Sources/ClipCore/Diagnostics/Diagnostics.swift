@@ -125,9 +125,12 @@ public enum Diagnostics {
         add("translation.zh-en", probes.translation == nil ? .skip : (probes.translation == "installed" ? .pass : .warn),
             probes.translation ?? "not probed")
         add("hotkey", probes.hotkey == nil ? .skip : (probes.hotkey!.hasPrefix("failed") ? .fail : .pass), probes.hotkey ?? "app not running in this process")
+        // From a terminal macOS checks the terminal's trust, not ClipVault's, so only the running app can answer.
         if let ax = probes.accessibility {
             add("permission.accessibility", ax ? .pass : .warn,
                 ax ? "granted → Enter pastes at the cursor" : "not granted → Enter only copies (press ⌘V yourself); System Settings › Privacy & Security › Accessibility")
+        } else {
+            add("permission.accessibility", .skip, "app not running in this process (see 设置 › 诊断)")
         }
         if let li = probes.loginItem {
             add("login_item", li == "requiresApproval" ? .warn : .pass, li)
