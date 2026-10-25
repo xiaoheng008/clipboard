@@ -200,7 +200,7 @@ struct RowView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            icon.frame(width: 36, height: 36)
+            icon.frame(width: 64, height: 52)       // as tall as two title lines + meta, so screenshots stay legible
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).lineLimit(2).font(.system(size: 13))
                 HStack(spacing: 6) {
@@ -219,7 +219,7 @@ struct RowView: View {
     @ViewBuilder private var icon: some View {
         switch row.item.kind {
         case .image:
-            if let h = row.item.blobHash { ThumbnailView(hash: h, url: service.blobURL(h), maxPixel: 96) }
+            if let h = row.item.blobHash { ThumbnailView(hash: h, url: service.blobURL(h), maxPixel: 192) }
         case .file: Image(systemName: "doc").font(.title2).foregroundStyle(.secondary)
         case .url: Image(systemName: "link").font(.title2).foregroundStyle(.secondary)
         case .rich: Image(systemName: "doc.richtext").font(.title2).foregroundStyle(.secondary)
