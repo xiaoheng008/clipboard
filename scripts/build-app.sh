@@ -33,8 +33,16 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
 </dict></plist>
 PLIST
-codesign --force --sign - --timestamp=none "$APP"
+# A stable identity keeps privacy grants across rebuilds (scripts/setup-signing.sh); otherwise ad-hoc.
+SIGN_ID="ClipVault Local Signing"
+if security find-identity -p codesigning 2>/dev/null | grep -q "\"$SIGN_ID\""; then
+  codesign --force --sign "$SIGN_ID" --timestamp=none "$APP"
+else
+  echo "note: no \"$SIGN_ID\" identity, signing ad-hoc (run scripts/setup-signing.sh once)"
+  SIGN_ID="-"
+  codesign --force --sign - --timestamp=none "$APP"
+fi
 codesign --verify --verbose=2 "$APP"
 rm -rf "$BUILD"
 SIZE=$(du -sk "$APP" | cut -f1)
-echo "built $APP  version $VERSION ($BUILDNO)  size ${SIZE} KB"
+echo "built $APP  version $VERSION ($BUILDNO)  size ${SIZE} KB  signed: $SIGN_ID"
