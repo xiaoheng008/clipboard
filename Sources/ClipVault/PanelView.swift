@@ -199,27 +199,53 @@ struct RowView: View {
     let service: ClipService
 
     var body: some View {
+        if row.item.kind == .image { imageRow } else { textRow }
+    }
+
+    // Text rows: a small kind icon; the words are the content.
+    private var textRow: some View {
         HStack(alignment: .top, spacing: 8) {
-            icon.frame(width: 64, height: 52)       // as tall as two title lines + meta, so screenshots stay legible
+            icon.frame(width: 36, height: 36)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).lineLimit(2).font(.system(size: 13))
-                HStack(spacing: 6) {
-                    if row.item.pinned { Image(systemName: "pin.fill").foregroundStyle(.orange) }
-                    Text(meta).foregroundStyle(.secondary)
-                    ForEach(row.sources.sorted { $0.rawValue < $1.rawValue }, id: \.self) { s in
-                        Text(badge(s)).padding(.horizontal, 4).background(.quaternary, in: Capsule())
-                    }
-                }
-                .font(.caption2)
+                metaLine
             }
         }
         .padding(.vertical, 2)
     }
 
+    // Image rows: the picture is the content, so it gets most of the row; OCR text is a secondary caption.
+    private var imageRow: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Group {
+                if let h = row.item.blobHash { ThumbnailView(hash: h, url: service.blobURL(h), maxPixel: 480) }
+            }
+            .frame(width: 160, height: 100, alignment: .leading)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).lineLimit(4).font(.system(size: 12)).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                metaLine
+            }
+            .frame(maxHeight: 100, alignment: .top)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var metaLine: some View {
+        HStack(spacing: 6) {
+            if row.item.pinned { Image(systemName: "pin.fill").foregroundStyle(.orange) }
+            Text(meta).foregroundStyle(.secondary)
+            ForEach(row.sources.sorted { $0.rawValue < $1.rawValue }, id: \.self) { s in
+                Text(badge(s)).padding(.horizontal, 4).background(.quaternary, in: Capsule())
+            }
+        }
+        .font(.caption2)
+    }
+
     @ViewBuilder private var icon: some View {
         switch row.item.kind {
         case .image:
-            if let h = row.item.blobHash { ThumbnailView(hash: h, url: service.blobURL(h), maxPixel: 192) }
+            EmptyView()
         case .file: Image(systemName: "doc").font(.title2).foregroundStyle(.secondary)
         case .url: Image(systemName: "link").font(.title2).foregroundStyle(.secondary)
         case .rich: Image(systemName: "doc.richtext").font(.title2).foregroundStyle(.secondary)
