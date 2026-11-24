@@ -73,31 +73,42 @@ public enum QueryPlanner {
     }
 }
 
-/// Pure: reciprocal-rank fusion of text and semantic hits (3.2-api-design.md).
+/// Pure: text-first fusion of text and semantic hits.
+/// Text matches are shown first (by time desc), then semantic-only matches.
 public enum RankFusion {
     public static let k = 60.0
 
     public static func fuse(text: [TextHit], semantic: [SemanticHit], threshold: Float, limit: Int) -> [Hit] {
-        struct Acc { var item: ItemSummary; var sources: Set<MatchSource>; var score: Double; var sim: Float? }
+        struct Acc { var item: ItemSummary; var sources: Set<MatchSource>; var score: Double; var sim: Float?; var hasText: Bool }
         var acc: [Int64: Acc] = [:]
-        var order: [Int64] = []
-        for (rank, h) in text.enumerated() {
-            if acc[h.item.id] == nil { order.append(h.item.id); acc[h.item.id] = Acc(item: h.item, sources: [], score: 0, sim: nil) }
+        
+        // Mark all text matches
+        for h in text {
+            if acc[h.item.id] == nil { 
+                acc[h.item.id] = Acc(item: h.item, sources: [], score: 0, sim: nil, hasText: true)
+            }
             acc[h.item.id]!.sources.formUnion(h.sources)
-            acc[h.item.id]!.score += 1 / (k + Double(rank + 1))
+            acc[h.item.id]!.hasText = true
         }
-        for (rank, h) in semantic.filter({ $0.score >= threshold }).enumerated() {
-            if acc[h.item.id] == nil { order.append(h.item.id); acc[h.item.id] = Acc(item: h.item, sources: [], score: 0, sim: nil) }
+        
+        // Add semantic matches (may overlap with text)
+        for h in semantic.filter({ $0.score >= threshold }) {
+            if acc[h.item.id] == nil { 
+                acc[h.item.id] = Acc(item: h.item, sources: [], score: 0, sim: nil, hasText: false)
+            }
             acc[h.item.id]!.sources.insert(.semantic)
-            acc[h.item.id]!.score += 1 / (k + Double(rank + 1))
             acc[h.item.id]!.sim = h.score
         }
-        let firstSeen = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
-        return order.compactMap { acc[$0] }
+        
+        // Sort: text matches first (by time desc), then semantic-only (by similarity desc)
+        return acc.values
             .sorted { a, b in
-                if a.score != b.score { return a.score > b.score }
-                if a.item.lastUsedAt != b.item.lastUsedAt { return a.item.lastUsedAt > b.item.lastUsedAt }
-                return firstSeen[a.item.id]! < firstSeen[b.item.id]!
+                // Text matches always come before semantic-only
+                if a.hasText != b.hasText { return a.hasText }
+                // Within text matches: sort by time (most recent first)
+                if a.hasText && b.hasText { return a.item.lastUsedAt > b.item.lastUsedAt }
+                // Within semantic-only: sort by similarity score
+                return (a.sim ?? 0) > (b.sim ?? 0)
             }
             .prefix(limit)
             .map { Hit(item: $0.item, sources: $0.sources, score: $0.score, similarity: $0.sim) }

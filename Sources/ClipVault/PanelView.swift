@@ -70,6 +70,8 @@ struct PanelView: View {
         }
         .onKeyPress(.downArrow) { model.moveSelection(1); return .handled }
         .onKeyPress(.upArrow) { model.moveSelection(-1); return .handled }
+        .onKeyPress(.leftArrow) { model.switchKind(-1); return .handled }
+        .onKeyPress(.rightArrow) { model.switchKind(1); return .handled }
         .onKeyPress(.return, phases: .down) { press in
             model.pasteSelected(commandHeld: press.modifiers.contains(.command)); return .handled
         }

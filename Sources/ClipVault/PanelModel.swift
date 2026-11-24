@@ -230,6 +230,13 @@ final class PanelModel {
         if delta > 0 { loadMoreIfNeeded(current: rows[j]) }
     }
 
+    func switchKind(_ delta: Int) {
+        let kinds: [KindFilter] = [.all, .text, .image, .file, .url]
+        guard let current = kinds.firstIndex(of: kind) else { return }
+        let next = (current + delta + kinds.count) % kinds.count
+        kind = kinds[next]
+    }
+
     // MARK: Actions
 
     /// FR21/22: links and file paths are plain text; while ⌘ is held they turn into blue, clickable links.
